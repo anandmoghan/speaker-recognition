@@ -1,0 +1,17 @@
+{
+  "ROOT": "/home/data",
+  "LOCATION": {
+    "SRE04": "SRE04_TEST/test2/export/corpora5/LDC/LDC2006S44/r93_6_1/sp04-06/test",
+    "SRE05_TRAIN": "SRE05_TRAIN/LDC2011S01",
+    "SRE05_TEST": "SRE05_TEST/LDC2011S04",
+    "SRE06": "SRE06_TRAIN/export/corpora5/LDC/LDC2011S09",
+    "SRE08_TRAIN": "SRE08_TRAIN/LDC2011S05",
+    "SRE08_TEST": "SRE08_TEST/export/corpora5/LDC/LDC2011S08",
+    "SRE10": "SRE10/export/corpora5/SRE/SRE2010/eval",
+    "SWBD_C1": "swbd_cellular/export/corpora5/LDC/LDC2001S13",
+    "SWBD_C2": "swbd_cellular/export/corpora5/LDC/LDC2004S07",
+    "SRE16_EVAL": "SRE16/R149_0_1",
+    "SRE16_UNLABELED": "SRE16/Call_My_Net_Training_Data"
+  },
+  "SPEAKER_KEY": "../configs/speaker_list"
+}
