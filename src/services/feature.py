@@ -1,14 +1,19 @@
 from subprocess import Popen, PIPE
 from scipy import signal
+from os.path import join as join_path
 
 import numpy as np
+import logging
 import resampy
+
+from constants.app_constants import MFCC_DIR, SAD_DIR, SAD_LIST_FILE
+from services.common import make_directory, save_array
 
 
 class MFCC:
     def __init__(self, fs=8000, n_fft=512, frame_len_ms=25, frame_inc_ms=10,
                  pre_emph_coef=0.97, n_channels=24, fl=100, fh=4000, n_ceps=20,
-                 filter_shape='', win_type='hamm', spectrum_type='mag', compression='log'):
+                 filter_shape='', win_type='hamm', spectrum_type='mag', compression='log', save_loc='../save'):
         self.fs = fs
         self.nfft = n_fft
         self.frame_len = int(frame_len_ms * fs / 1000)
@@ -23,6 +28,9 @@ class MFCC:
         self.compression = compression
         self.mel_bank_coef = self.mel_bank(filter_shape)
         self.dctmat = get_dct_matrix(n_channels)[:n_ceps]
+        self.save_loc = join_path(save_loc, MFCC_DIR)
+        self.sad_loc = join_path(save_loc, SAD_DIR)
+        make_directory(self.save_loc)
 
     def mel_bank(self, filter_shape=None):
         mel_fl = MFCC.hz2mel(self.fl)
@@ -56,31 +64,43 @@ class MFCC:
         mfc = log_e.dot(self.dctmat.T).T
         return mfc
 
-    def extract_with_sad_and_cmvn(self, speech):
+    def extract_with_sad_and_cmvn(self, speech, sad_loc):
         features = self.extract(speech)
-        sad = np.ones((features.shape[1],), dtype=np.bool)
+        sad = read_3col_sad(sad_loc, features.shape[1])
         features = rasta_filter(features)
         features = np.r_[features[:, sad]]
         features = cmvn(features)
         features = window_cmvn(features, window_len=301, var_norm=False)
         return features
 
-    def extract_sph_file(self, file_list):
+    def extract_sph_file_with_sad_and_cmvn(self, args, save=True):
+        speech, sr = read_sph_audio(args[1], args[2])
+        if sr > self.fs:
+            speech = resample(speech, sr, self.fs)
+        logging.info('Extracting MFCC: {}'.format(args[0]))
+        sad_loc = join_path(self.sad_loc, args[0] + '.sad')
+        mfcc = self.extract_with_sad_and_cmvn(speech, sad_loc)
+        if save:
+            file_name = join_path(self.save_loc, str(args[0]) + '.npy')
+            save_array(file_name, mfcc)
+            logging.info('Saved {} as {}'.format(args[0], file_name))
+            return mfcc.shape[1]
+        return mfcc
+
+    def extract_sph_files(self, args_list):
         mfcc = []
-        for file_name in file_list:
-            speech, sr = read_sph_audio(file_name)
+        for args in args_list:
+            speech, sr = read_sph_audio(args[1], args[2])
             if sr > self.fs:
                 speech = resample(speech, sr, self.fs)
+                logging.info('Extracting MFCC for: {}'.format(args[0]))
             mfcc.append([self.extract(speech)])
         return mfcc
 
-    def extract_sph_files_with_sad_and_cmvn(self, file_list):
+    def extract_sph_files_with_sad_and_cmvn(self, args_list):
         mfcc = []
-        for file_name in file_list:
-            speech, sr = read_sph_audio(file_name)
-            if sr > self.fs:
-                speech = resample(speech, sr, self.fs)
-            mfcc.append([self.extract_with_sad_and_cmvn(speech)])
+        for args in args_list:
+            mfcc.append([self.extract_sph_file_with_sad_and_cmvn(args, save=False)])
         return mfcc
 
     @staticmethod
@@ -167,6 +187,13 @@ def get_dct_matrix(n):
     return dct_matrix
 
 
+def generate_sad_list(save_loc, args_list, append=False):
+    sad_list_file = join_path(save_loc, SAD_LIST_FILE)
+    with open(sad_list_file, 'a' if append else 'w') as f:
+        for args in args_list:
+            f.write('{}, {}, {}/{}/{}.sad\n'.format(args[1], ('a' if args[2] == '1' else 'b'), save_loc, SAD_DIR, args[0]))
+
+
 def hamming(n, periodic=False):
     window_len = n if periodic else n-1
     w = 0.54 - 0.46 * np.cos(2 * np.pi * np.arange(n+1) / window_len)
@@ -205,24 +232,27 @@ def rasta_filter(x):
 
 
 def read_3col_sad(filename, nobs):
-    with open(filename, 'r') as fid:
-        lines = fid.read().splitlines()
-    sad = np.zeros((nobs,), dtype=np.bool)
-    for line in lines:
-        fields = line.split()
-        be = int(100 * float(fields[1]))
-        en = min(int(100 * float(fields[2])), nobs)
-        sad[be:en] = True
+    try:
+        with open(filename, 'r') as fid:
+            lines = fid.read().splitlines()
+        sad = np.zeros((nobs,), dtype=np.bool)
+        for line in lines:
+            fields = line.split()
+            be = int(100 * float(fields[1]))
+            en = min(int(100 * float(fields[2])), nobs)
+            sad[be:en] = True
+    except FileNotFoundError:
+        sad = np.ones((nobs,), dtype=np.bool)
     return sad
 
 
 def read_sph_audio(filename, ch=1):
     cmd = "sph2pipe -f wav -p -c {} {}".format(ch, filename)
     p = Popen(cmd, stdout=PIPE, shell=True)
-    out = p.stdout.read()
+    output, error_output = p.communicate()
     # n_channels = np.frombuffer(out, dtype='H', count=1, offset=22)[0]
-    sample_rate = np.frombuffer(out, dtype='uint32', count=1, offset=24)[0]
-    data = np.frombuffer(out, dtype=np.int16, count=-1, offset=44).astype('f8')
+    sample_rate = np.frombuffer(output, dtype='uint32', count=1, offset=24)[0]
+    data = np.frombuffer(output, dtype=np.int16, count=-1, offset=44).astype('f8')
     data /= 2**15  # assuming 16-bit
     return data, sample_rate
 

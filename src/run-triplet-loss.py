@@ -1,56 +1,87 @@
-from services.common import load_object, run_parallel, save_object
-from services.sre_data import get_sre_swbd_data, make_sre16_eval_data, make_sre16_unlabeled_data
-from services.data import check_data_dir
-from services.feature import MFCC
+from models.x_vector import XVectorModel
+from services.checks import check_sad
+from services.common import load_object, tensorflow_debug, run_parallel, save_object
+from services.loader import SREBatchLoader
+from services.sre_data import get_sre_swbd_data, make_sre16_eval_data
+from services.feature import MFCC, generate_sad_list
 from services.logger import Logger
 
 from os.path import join as join_path
 
 import argparse as ap
+import numpy as np
 
-SAVE_LOCATION = '../save'
+
 SRE_CONFIG = '../configs/sre_data.json'
 
-
 parser = ap.ArgumentParser()
-parser.add_argument('-s', '--stage', type=int, default=0, help='Set Stage')
-parser.add_argument('-sr', '--sample_rate', type=int, default=8000, help='Sampling Rate')
+parser.add_argument('--bg', action="store_true", default=False, help='Background Option')
+parser.add_argument('--batch-size', type=int, default=16, help='Batch Size')
+parser.add_argument('--epochs', type=int, default=8, help='Number of Epochs')
+parser.add_argument('--num-features', type=int, default=24, help='Batch Size')
+parser.add_argument('--sample-rate', type=int, default=8000, help='Sampling Rate')
+parser.add_argument('--save', default='../save', help='Save Location')
+parser.add_argument('--stage', type=int, default=2, help='Set Stage')
 args = parser.parse_args()
 
-logger = Logger(filename='../logs/run-triplet-loss.log', append=False)
+logger = Logger()
+logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
+
+tensorflow_debug(False)
+
 
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
     sre_swbd = get_sre_swbd_data(SRE_CONFIG)
+    logger.info('Stage 0: Made {:d} files from sre_swbd.'.format(sre_swbd.shape[0]))
     sre16_eval_enrollment, sre16_eval_test = make_sre16_eval_data(SRE_CONFIG)
-    print(sre_swbd.shape)
-    logger.info('Saving data lists..')
-    save_object(join_path(SAVE_LOCATION, 'sre_swbd.pkl'), sre_swbd)
-    save_object(join_path(SAVE_LOCATION, 'sre16_eval_enrollment.pkl'), sre16_eval_enrollment)
-    save_object(join_path(SAVE_LOCATION, 'sre16_eval_test.pkl'), sre16_eval_test)
-    logger.info('Data lists saved at: {}'.format(SAVE_LOCATION))
+    logger.info('Stage 0: Saving data lists..')
+    save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
+    save_object(join_path(args.save, 'sre16_eval_enrollment.pkl'), sre16_eval_enrollment)
+    save_object(join_path(args.save, 'sre16_eval_test.pkl'), sre16_eval_test)
+    # TODO: Make sre2016 unlabeled data
+    logger.info('Stage 0: Data lists saved at: {}'.format(args.save))
+    logger.info('Stage 0: Generating SAD list file.')
+    generate_sad_list(args.save, sre_swbd)
+    generate_sad_list(args.save, sre16_eval_enrollment, append=True)
+    generate_sad_list(args.save, sre16_eval_test, append=True)
+    logger.info('Stage 0: Saved SAD list file at: {}'.format(args.save))
     logger.end_timer('Stage 0:')
 else:
-    logger.start_timer('Loading data lists from: {}'.format(SAVE_LOCATION))
-    sre_swbd = load_object(join_path(SAVE_LOCATION, 'sre_swbd.pkl'))
-    sre16_eval_enrollment = load_object(join_path(SAVE_LOCATION, 'sre16_eval_enrollment.pkl'))
-    sre16_eval_test = load_object(join_path(SAVE_LOCATION, 'sre16_eval_test.pkl'))
-    logger.end_timer('Data loaded.')
+    logger.start_timer('Loading data lists from: {}'.format(args.save))
+    sre_swbd = load_object(join_path(args.save, 'sre_swbd.pkl'))
+    sre16_eval_enrollment = load_object(join_path(args.save, 'sre16_eval_enrollment.pkl'))
+    sre16_eval_test = load_object(join_path(args.save, 'sre16_eval_test.pkl'))
+    logger.end_timer('Data lists loaded.')
 
-exit(1)
 
 if args.stage <= 1:
     logger.start_timer('Stage 1: Extracting Features...')
-    mfcc = MFCC(fs=args.sample_rate, n_channels=24, fl=20, fh=3700, n_ceps=23)
-    combined_features = run_parallel(mfcc.extract_sph_files_with_sad_and_cmvn, sre_swbd, batch_size=32, n_workers=20)
-    save_object(join_path(SAVE_LOCATION, 'combined_features.pkl'), combined_features)
-    logger.info('Features saved at: {}'.format(SAVE_LOCATION))
+    success, fail = check_sad(args.save, sre_swbd)
+    if fail > 0:
+        print('Warning: SAD files not present for {:d} utterances.'.format(fail))
+    mfcc = MFCC(fs=args.sample_rate, n_channels=args.num_features, fl=20, fh=3700, n_ceps=40, save_loc=args.save)
+    frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre_swbd, n_workers=24, p_bar=(not args.bg))
+    frames = np.array(frames).reshape(-1, 1)
+    logger.info('Stage 1: {:d} files processed.'.format(frames.shape[0]))
+    sre_swbd = np.hstack([sre_swbd, frames])
+    save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
+    logger.info('Stage 1: Indices saved.')
     logger.end_timer('Stage 1:')
 else:
-    logger.start_timer('Loading Features...')
-    features = load_object(join_path(SAVE_LOCATION, 'feature.pkl'))
-    logger.end_timer()
+    if sre_swbd.shape[1] < 5:
+        raise Exception('Execute Stage 1 before proceeding.')
+
 
 if args.stage <= 2:
-    logger.start_timer('Stage 2: Neural Net Model...')
-    logger.end_timer()
+    logger.start_timer('Stage 2: Training...')
+    speakers = sre_swbd[:, 3]
+    unique_speakers = set(speakers)
+    n_speakers = len(unique_speakers)
+    logger.info('Total Speakers: {:d}'.format(n_speakers))
+    speaker_to_idx = dict(zip(speakers, range(len(speakers))))
+    batch_loader = SREBatchLoader(location=args.save, args=sre_swbd[:, 2:], speaker_dict=speaker_to_idx,
+                                  n_features=args.num_features, batch_size=args.batch_size)
+    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    model.start_train(batch_loader)
+    logger.end_timer('Stage 2:')
