@@ -58,7 +58,7 @@ def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
                     file_loc = file_list[file_name]
                     index_list.append(sre_year + '_' + file_name)
                     location_list.append(file_loc)
-                    speaker_list.append(speaker_id)
+                    speaker_list.append(sre_year + '_' + speaker_id)
                     channel_list.append(1 if channel == 'A' else 2)
                     del file_list[file_name]
                 except KeyError:
@@ -97,7 +97,7 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
                 index_list.append('sre2008_' + file_name)
                 location_list.append(file_loc)
                 channel_list.append(1 if channel == 'a' else 2)
-                speaker_list.append(speaker_id)
+                speaker_list.append('sre2008_' + speaker_id)
                 del file_list[file_name]
             except KeyError:
                 pass
@@ -116,7 +116,7 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
                     index_list.append('sre2008_' + file_name)
                     location_list.append(file_loc)
                     channel_list.append(1 if channel == 'a' else 2)
-                    speaker_list.append(speaker_id)
+                    speaker_list.append('sre2008_' + speaker_id)
                     del file_list[file_name]
             except KeyError:
                 pass
@@ -158,7 +158,7 @@ def make_sre10_data(data_root, data_loc):
                 speaker_id = model_to_speaker[model_id]
                 index_list.append('sre2010_' + file_name)
                 location_list.append(file_loc)
-                speaker_list.append(speaker_id)
+                speaker_list.append('sre2010_' + speaker_id)
                 channel_list.append(1 if channel == 'A' else 2)
                 del file_list[file_name]
             except KeyError:
@@ -177,7 +177,7 @@ def make_sre10_data(data_root, data_loc):
                 if target_type == 'target':
                     index_list.append('sre2010_' + file_name)
                     location_list.append(file_loc)
-                    speaker_list.append(speaker_id)
+                    speaker_list.append('sre2010_' + speaker_id)
                     channel_list.append(1 if channel == 'A' else 2)
                     del file_list[file_name]
             except KeyError:
@@ -217,11 +217,11 @@ def make_swbd_cellular(data_root, data_loc, swbd_type=1):
                 index_list.append(swbd_type + file_name + '_ch1')
                 location_list.append(file_loc)
                 channel_list.append(1)
-                speaker_list.append(speaker_id1)
+                speaker_list.append('sw_' + speaker_id1)
                 index_list.append(swbd_type + file_name + '_ch2')
                 location_list.append(file_loc)
                 channel_list.append(2)
-                speaker_list.append(speaker_id2)
+                speaker_list.append('sw_' + speaker_id2)
                 del file_list['sw_' + str(file_name)]
             except KeyError:
                 pass
@@ -254,7 +254,7 @@ def make_sre16_eval_data(sre_config):
                 file_loc = file_list[file_name]
                 index_list.append('sre16_eval_enroll_' + file_name)
                 location_list.append(file_loc)
-                speaker_list.append(speaker_id)
+                speaker_list.append('sre16_eval_enroll_' + speaker_id)
                 channel_list.append(1)
                 del file_list[file_name]
             except KeyError:
@@ -297,7 +297,7 @@ def make_sre16_eval_data(sre_config):
                 file_loc = file_list[file_name]
                 index_list.append('sre16_eval_test_' + file_name)
                 location_list.append(file_loc)
-                speaker_list.append(speaker_id)
+                speaker_list.append('sre16_eval_test_' + speaker_id)
                 channel_list.append(1)
                 language_list.append(call_to_language[call_id])
                 target_list.append(target_type)
