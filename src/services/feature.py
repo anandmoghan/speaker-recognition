@@ -7,7 +7,7 @@ import logging
 import resampy
 
 from constants.app_constants import MFCC_DIR, SAD_DIR, SAD_LIST_FILE
-from services.common import make_directory, save_array
+from services.common import load_array, make_directory, run_parallel, save_array
 
 
 class MFCC:
@@ -179,6 +179,13 @@ def enframe(sig, frame_len, frame_inc):
     return frames[::frame_inc]
 
 
+def generate_sad_list(save_loc, args_list, append=False):
+    sad_list_file = join_path(save_loc, SAD_LIST_FILE)
+    with open(sad_list_file, 'a' if append else 'w') as f:
+        for args in args_list:
+            f.write('{}, {}, {}/{}/{}.sad\n'.format(args[1], ('a' if args[2] == '1' else 'b'), save_loc, SAD_DIR, args[0]))
+
+
 def get_dct_matrix(n):
     m = range(n)
     x, y = np.meshgrid(m, m)
@@ -187,11 +194,16 @@ def get_dct_matrix(n):
     return dct_matrix
 
 
-def generate_sad_list(save_loc, args_list, append=False):
-    sad_list_file = join_path(save_loc, SAD_LIST_FILE)
-    with open(sad_list_file, 'a' if append else 'w') as f:
-        for args in args_list:
-            f.write('{}, {}, {}/{}/{}.sad\n'.format(args[1], ('a' if args[2] == '1' else 'b'), save_loc, SAD_DIR, args[0]))
+def get_frame(file_loc):
+    return load_array(file_loc).shape[1]
+
+
+def get_mfcc_frames(save_loc, args):
+    mfcc_loc = join_path(save_loc, MFCC_DIR)
+    file_loc = []
+    for a in args:
+        file_loc.append(join_path(mfcc_loc, a + '.npy'))
+    return np.array(run_parallel(get_frame, file_loc)).reshape([-1, 1])
 
 
 def hamming(n, periodic=False):
@@ -204,6 +216,10 @@ def hanning(n, periodic=False):
     window_len = n if periodic else n-1
     w = np.sin(np.pi * np.arange(n+1) / window_len)**2
     return w[:-1]
+
+
+def load_feature(file_name):
+    return load_array(file_name)
 
 
 def l2norm(x, axis=0):

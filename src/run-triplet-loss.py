@@ -1,10 +1,11 @@
 from collections import Counter
 
+from models.x_vector import XVectorModel
 from services.checks import check_mfcc, check_sad
 from services.common import load_object, tensorflow_debug, run_parallel, save_object
 from services.loader import SRESplitBatchLoader
 from services.sre_data import get_sre_swbd_data, make_sre16_eval_data
-from services.feature import MFCC, generate_sad_list
+from services.feature import MFCC, generate_sad_list, get_mfcc_frames
 from services.logger import Logger
 
 from os.path import join as join_path
@@ -16,7 +17,7 @@ SRE_CONFIG = '../configs/sre_data.json'
 
 parser = ap.ArgumentParser()
 parser.add_argument('--bg', action="store_true", default=False, help='Background Option')
-parser.add_argument('--batch-size', type=int, default=16, help='Batch Size')
+parser.add_argument('--batch-size', type=int, default=64, help='Batch Size')
 parser.add_argument('--epochs', type=int, default=8, help='Number of Epochs')
 parser.add_argument('--lr', type=float, default=0.01, help='Learning Rate')
 parser.add_argument('--num-features', type=int, default=24, help='Batch Size')
@@ -54,6 +55,7 @@ else:
     sre16_eval_test = load_object(join_path(args.save, 'sre16_eval_test.pkl'))
     logger.end_timer('Load:')
 
+
 if args.stage <= 1:
     logger.start_timer('Stage 1: Extracting Features...')
     success, fail = check_sad(args.save, sre_swbd)
@@ -69,18 +71,22 @@ if args.stage <= 1:
     logger.end_timer('Stage 1:')
 else:
     logger.start_timer('Check: Looking for features...')
-    if sre_swbd.shape[1] < 5:
-        raise Exception('Execute Stage 1 before proceeding.')
-
     success, fail = check_mfcc(args.save, sre_swbd)
     if fail > 0:
-        print('Warning: No features for {:d} files'.format(fail))
+        raise Exception('No features for {:d} files. Execute Stage 1 before proceeding.'.format(fail))
+    elif sre_swbd.shape[1] < 5:
+        logger.info('Check: Fetching frames...')
+        frames = get_mfcc_frames(args.save, sre_swbd[:, 0])
+        logger.info('Check: Appending and saving...')
+        sre_swbd = np.hstack([sre_swbd, frames])
+        save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
     logger.end_timer('Check:')
+
 
 if args.stage <= 2:
     logger.start_timer('Stage 2: Pre-processing...')
     logger.info('Stage 2: Filtering out short duration utterances and sorting by duration...')
-    sre_swbd = sre_swbd[np.array(sre_swbd[:, 4], dtype=int) > 300]
+    sre_swbd = sre_swbd[np.array(sre_swbd[:, 4], dtype=int) >= 300]
     sre_swbd = sre_swbd[np.argsort(np.array(sre_swbd[:, 4], dtype=int))]
     logger.info('Stage 2: Filtering out speakers having lesser training data...')
     speakers = sre_swbd[:, 3]
@@ -89,28 +95,37 @@ if args.stage <= 2:
     speaker_counter = Counter(speakers)
     good_speakers = []
     for speaker in unique_speakers:
-        if speaker_counter[speaker] > 5:
+        if speaker_counter[speaker] >= 5:
             good_speakers.append(speaker)
     sre_swbd = sre_swbd[np.in1d(speakers, good_speakers), :]
     speakers = sre_swbd[:, 3]
     unique_speakers = set(speakers)
     logger.info('Stage 2: Total Speakers after filtering: {:d}'.format(len(unique_speakers)))
-    speaker_to_idx = dict(zip(speakers, range(len(speakers))))
     logger.info('Stage 2: Training Utterances after filtering: {:d}'.format(sre_swbd.shape[0]))
+    logger.info('Stage 2: Making Speaker dictionaries...')
+    n_speakers = len(unique_speakers)
+    speaker_to_idx = dict(zip(unique_speakers, range(len(unique_speakers))))
+    idx_to_speaker = dict(zip(range(len(unique_speakers)), unique_speakers))
+    sre_swbd[:, 3] = np.array(map(lambda x: speaker_to_idx[x], speakers))
     save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
     save_object(join_path(args.save, 'speaker_to_idx.pkl'), speaker_to_idx)
+    save_object(join_path(args.save, 'idx_to_speaker.pkl'), idx_to_speaker)
     logger.end_timer('Stage 2:')
 else:
+    logger.start_timer('Load: Speaker dictionaries from: {}'.format(args.save))
     speakers = sre_swbd[:, 3]
     n_speakers = len(set(speakers))
     speaker_to_idx = load_object(join_path(args.save, 'speaker_to_idx.pkl'))
+    idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
+    logger.end_timer('Load:')
 
-exit(1)
 
 if args.stage <= 3:
-    batch_loader = SRESplitBatchLoader(location=args.save, args=sre_swbd, speaker_dict=speaker_to_idx,
-                                       n_features=args.num_features, batch_size=args.batch_size)
-    # model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers,
-    #                      learning_rate=args.lr)
-    # model.start_train(batch_loader, args.epochs)
-    batch_loader.next()
+    logger.start_timer('Stage 3: x-Vector Model Training...')
+    batch_loader = SRESplitBatchLoader(location=args.save, args=sre_swbd, n_features=args.num_features,
+                                       splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
+    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers,
+                         learning_rate=args.lr)
+    model.start_train(batch_loader, args.epochs)
+    batch_x, batch_y = batch_loader.next()
+    logger.end_timer('Stage 3:')
