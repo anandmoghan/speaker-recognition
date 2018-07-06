@@ -85,6 +85,10 @@ def save_object(file_name, obj):
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
 
+def sort_by_index(args_list):
+    return args_list[args_list[:, 0].argsort()]
+
+
 def tensorflow_debug(debug=False):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' if debug is False else '1'
 

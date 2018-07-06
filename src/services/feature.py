@@ -232,16 +232,20 @@ def rasta_filter(x):
 
 
 def read_3col_sad(filename, nobs):
+    sad = np.zeros((nobs,), dtype=np.bool)
     try:
         with open(filename, 'r') as fid:
             lines = fid.read().splitlines()
-        sad = np.zeros((nobs,), dtype=np.bool)
         for line in lines:
             fields = line.split()
             be = int(100 * float(fields[1]))
             en = min(int(100 * float(fields[2])), nobs)
             sad[be:en] = True
     except FileNotFoundError:
+        pass
+    except ValueError:
+        pass
+    if sad.sum() == 0:
         sad = np.ones((nobs,), dtype=np.bool)
     return sad
 

@@ -4,7 +4,7 @@ from os.path import join as join_path
 import numpy as np
 import re
 
-from services.common import get_file_list, get_file_list_as_dict
+from services.common import get_file_list, get_file_list_as_dict, sort_by_index
 
 
 def get_file_name(x):
@@ -26,14 +26,15 @@ def get_sre_swbd_data(sre_config):
     sre10 = make_sre10_data(data_root, data_loc['SRE10'])
     swbd_c1 = make_swbd_cellular(data_root, data_loc['SWBD_C1'], 1)
     swbd_c2 = make_swbd_cellular(data_root, data_loc['SWBD_C2'], 2)
-    return np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2]).T
+    print('Sorting sre_swbd data...')
+    return sort_by_index(np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2]).T)
 
 
 def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
     print('Making sre{} lists...'.format(sre_year))
     sre_loc = join_path(data_root, data_loc)
     sre_year = 'sre' + str(sre_year)
-    bad_audio = ['jcli']
+    bad_audio = ['jagi', 'jaly', 'jbrg', 'jcli', 'jfmx']
     file_list = get_file_list_as_dict(sre_loc)
 
     for ba in bad_audio:
@@ -116,6 +117,7 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
                     location_list.append(file_loc)
                     channel_list.append(1 if channel == 'a' else 2)
                     speaker_list.append(speaker_id)
+                    del file_list[file_name]
             except KeyError:
                 pass
 
@@ -220,6 +222,7 @@ def make_swbd_cellular(data_root, data_loc, swbd_type=1):
                 location_list.append(file_loc)
                 channel_list.append(2)
                 speaker_list.append(speaker_id2)
+                del file_list['sw_' + str(file_name)]
             except KeyError:
                 pass
 

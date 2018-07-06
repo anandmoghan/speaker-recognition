@@ -9,10 +9,10 @@ from services.common import run_parallel, load_array
 class SREBatchLoader:
     def __init__(self, location, args, n_features, speaker_dict, batch_size):
         self.location = join_path(location, MFCC_DIR)
-        self.classes = np.array([speaker_dict[k] for k in args[:, 1]])
+        self.classes = np.array([speaker_dict[k] for k in args[:, 3]])
         self.feature_idx = np.array(args[:, 0])
         self.n_features = n_features
-        self.frames = np.array(args[:, 2], dtype=int)
+        self.frames = np.array(args[:, 4], dtype=int)
         self.data_len = self.feature_idx.shape[0]
         if not self.data_len == self.classes.shape[0]:
             raise RuntimeError('Length of input and classes does not match.')
@@ -53,6 +53,28 @@ class SREBatchLoader:
 
     def total_batches(self):
         return self.n_batches
+
+
+class SRESplitBatchLoader(SREBatchLoader):
+    def __init__(self, location, args, n_features, speaker_dict, batch_size):
+        super().__init__(location, args, n_features, speaker_dict, batch_size)
+
+    def next(self):
+        print('Here')
+        current_split = self.batch_splits[self.batch_pointer]
+        self.batch_pointer = self.batch_pointer + 1
+        if self.batch_pointer == self.n_batches:
+            self.reset()
+        frames = self.frames[current_split]
+        max_len = max(frames)
+        if sum(frames/max_len < 0.95) < (0.05 * self.batch_size):
+            print('Batch formation issue.')
+            return self.next()
+        np_features = np.zeros([self.batch_size, self.n_features, max_len])
+        features = run_parallel(self.load_feature, current_split, n_workers=6, p_bar=False)
+        for i, f in enumerate(features):
+            np_features[i, :, max_len - frames[i]:] = f
+        return np_features, self.classes[current_split]
 
 
 class OnlineBatchLoader:
