@@ -114,6 +114,9 @@ class SRESplitBatchLoader:
         self.n_batches = int(len(self.current_split_index) / self.batch_size)
         self.reset()
 
+    def total_batches(self):
+        return self.n_batches
+
 
 class OnlineBatchLoader:
     def __init__(self, args_list, feature_extractor, batch_size):

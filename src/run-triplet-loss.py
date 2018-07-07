@@ -17,9 +17,10 @@ SRE_CONFIG = '../configs/sre_data.json'
 
 parser = ap.ArgumentParser()
 parser.add_argument('--bg', action="store_true", default=False, help='Background Option')
-parser.add_argument('--batch-size', type=int, default=64, help='Batch Size')
-parser.add_argument('--epochs', type=int, default=8, help='Number of Epochs')
-parser.add_argument('--lr', type=float, default=0.01, help='Learning Rate')
+parser.add_argument('--batch-size', type=int, default=128, help='Batch Size')
+parser.add_argument('--decay', type=float, default=0.9, help='Learning Rate')
+parser.add_argument('--epochs', type=int, default=20, help='Number of Epochs')
+parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
 parser.add_argument('--num-features', type=int, default=24, help='Batch Size')
 parser.add_argument('--sample-rate', type=int, default=8000, help='Sampling Rate')
 parser.add_argument('--save', default='../save', help='Save Location')
@@ -102,12 +103,13 @@ if args.stage <= 2:
     unique_speakers = set(speakers)
     logger.info('Stage 2: Total Speakers after filtering: {:d}'.format(len(unique_speakers)))
     logger.info('Stage 2: Training Utterances after filtering: {:d}'.format(sre_swbd.shape[0]))
+    save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
+
     logger.info('Stage 2: Making Speaker dictionaries...')
     n_speakers = len(unique_speakers)
-    speaker_to_idx = dict(zip(unique_speakers, range(len(unique_speakers))))
-    idx_to_speaker = dict(zip(range(len(unique_speakers)), unique_speakers))
-    sre_swbd[:, 3] = np.array(map(lambda x: speaker_to_idx[x], speakers))
-    save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
+    speaker_to_idx = dict(zip(unique_speakers, range(n_speakers)))
+    idx_to_speaker = dict(zip(range(n_speakers), unique_speakers))
+    sre_swbd[:, 3] = np.array([speaker_to_idx[s] for s in speakers])
     save_object(join_path(args.save, 'speaker_to_idx.pkl'), speaker_to_idx)
     save_object(join_path(args.save, 'idx_to_speaker.pkl'), idx_to_speaker)
     logger.end_timer('Stage 2:')
@@ -117,6 +119,7 @@ else:
     n_speakers = len(set(speakers))
     speaker_to_idx = load_object(join_path(args.save, 'speaker_to_idx.pkl'))
     idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
+    sre_swbd[:, 3] = np.array([speaker_to_idx[s] for s in speakers])
     logger.end_timer('Load:')
 
 
@@ -124,8 +127,6 @@ if args.stage <= 3:
     logger.start_timer('Stage 3: x-Vector Model Training...')
     batch_loader = SRESplitBatchLoader(location=args.save, args=sre_swbd, n_features=args.num_features,
                                        splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
-    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers,
-                         learning_rate=args.lr)
-    model.start_train(batch_loader, args.epochs)
-    batch_x, batch_y = batch_loader.next()
+    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay)
     logger.end_timer('Stage 3:')
