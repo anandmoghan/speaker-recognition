@@ -27,7 +27,7 @@ class MFCC:
         self.spectrum_type = spectrum_type
         self.compression = compression
         self.mel_bank_coef = self.mel_bank(filter_shape)
-        self.dctmat = get_dct_matrix(n_channels)[:n_ceps]
+        self.dct_matrix = get_dct_matrix(n_channels)[:n_ceps]
         self.save_loc = join_path(save_loc, MFCC_DIR)
         self.sad_loc = join_path(save_loc, SAD_DIR)
         make_directory(self.save_loc)
@@ -61,7 +61,7 @@ class MFCC:
             log_e = (fft_spectrum.dot(self.mel_bank_coef)) ** (1. / 15)
         else:
             raise ValueError('Compression type {} not supported!'.format(self.compression))
-        mfc = log_e.dot(self.dctmat.T).T
+        mfc = log_e.dot(self.dct_matrix.T).T
         return mfc
 
     def extract_with_sad_and_cmvn(self, speech, sad_loc):
@@ -183,7 +183,8 @@ def generate_sad_list(save_loc, args_list, append=False):
     sad_list_file = join_path(save_loc, SAD_LIST_FILE)
     with open(sad_list_file, 'a' if append else 'w') as f:
         for args in args_list:
-            f.write('{}, {}, {}/{}/{}.sad\n'.format(args[1], ('a' if args[2] == '1' else 'b'), save_loc, SAD_DIR, args[0]))
+            f.write('{}, {}, {}/{}/{}.sad\n'.format(args[1], ('a' if args[2] == '1' else 'b'), save_loc, SAD_DIR,
+                                                    args[0]))
 
 
 def get_dct_matrix(n):
@@ -270,7 +271,6 @@ def read_sph_audio(filename, ch=1):
     cmd = "sph2pipe -f wav -p -c {} {}".format(ch, filename)
     p = Popen(cmd, stdout=PIPE, shell=True)
     output, error_output = p.communicate()
-    # n_channels = np.frombuffer(out, dtype='H', count=1, offset=22)[0]
     sample_rate = np.frombuffer(output, dtype='uint32', count=1, offset=24)[0]
     data = np.frombuffer(output, dtype=np.int16, count=-1, offset=44).astype('f8')
     data /= 2**15  # assuming 16-bit

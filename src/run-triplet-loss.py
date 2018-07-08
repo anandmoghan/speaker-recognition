@@ -1,17 +1,16 @@
 from collections import Counter
-
-from models.x_vector import XVectorModel
-from services.checks import check_mfcc, check_sad
-from services.common import load_object, tensorflow_debug, run_parallel, save_object
-from services.loader import SRESplitBatchLoader
-from services.sre_data import get_sre_swbd_data, make_sre16_eval_data
-from services.feature import MFCC, generate_sad_list, get_mfcc_frames
-from services.logger import Logger
-
 from os.path import join as join_path
 
 import argparse as ap
 import numpy as np
+
+from models.x_vector import XVectorModel
+from services.checks import check_mfcc, check_sad
+from services.common import load_object, run_parallel, save_object
+from services.feature import MFCC, generate_sad_list, get_mfcc_frames
+from services.loader import SRESplitBatchLoader
+from services.logger import Logger
+from services.sre_data import get_sre_swbd_data, make_sre16_eval_data
 
 SRE_CONFIG = '../configs/sre_data.json'
 
@@ -29,8 +28,6 @@ args = parser.parse_args()
 
 logger = Logger()
 logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
-
-tensorflow_debug(False)
 
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
@@ -55,7 +52,6 @@ else:
     sre16_eval_enrollment = load_object(join_path(args.save, 'sre16_eval_enrollment.pkl'))
     sre16_eval_test = load_object(join_path(args.save, 'sre16_eval_test.pkl'))
     logger.end_timer('Load:')
-
 
 if args.stage <= 1:
     logger.start_timer('Stage 1: Extracting Features...')
@@ -82,7 +78,6 @@ else:
         sre_swbd = np.hstack([sre_swbd, frames])
         save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
     logger.end_timer('Check:')
-
 
 if args.stage <= 2:
     logger.start_timer('Stage 2: Pre-processing...')
@@ -121,7 +116,6 @@ else:
     idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
     sre_swbd[:, 3] = np.array([speaker_to_idx[s] for s in speakers])
     logger.end_timer('Load:')
-
 
 if args.stage <= 3:
     logger.start_timer('Stage 3: x-Vector Model Training...')

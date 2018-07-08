@@ -3,9 +3,9 @@ from tqdm import tqdm
 
 import multiprocessing as mp
 import numpy as np
+import os
 import pickle
 import time
-import os
 
 
 def get_file_list(location, pattern='*.sph'):
@@ -48,19 +48,6 @@ def put_time_stamp(text):
     return time.strftime(' %b %d, %Y %l:%M:%S%p - ') + text
 
 
-# def run_parallel(func, args_list, batch_size=64, n_workers=10, p_bar=True):
-#     n_parts = len(args_list) / batch_size
-#     args_split = np.array_split(args_list, n_parts)
-#     pool = mp.Pool(n_workers)
-#     if p_bar:
-#         res = tqdm(pool.imap(func, args_split), total=int(n_parts))
-#     else:
-#         res = pool.map(func, args_split)
-#     pool.close()
-#     if res is not None:
-#         return list(chain.from_iterable(res))
-
-
 def run_parallel(func, args_list, n_workers=10, p_bar=True):
     pool = mp.Pool(n_workers)
     if p_bar:
@@ -91,4 +78,3 @@ def sort_by_index(args_list):
 
 def tensorflow_debug(debug=False):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' if debug is False else '1'
-
