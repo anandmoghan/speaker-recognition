@@ -4,11 +4,7 @@ from os.path import join as join_path
 import numpy as np
 import re
 
-from services.common import get_file_list, get_file_list_as_dict, sort_by_index
-
-
-def get_file_name(x):
-    return x.split('/')[-1].split('.sph')[0]
+from services.common import get_file_list_as_dict, sort_by_index
 
 
 def get_sre_swbd_data(sre_config):
@@ -26,8 +22,12 @@ def get_sre_swbd_data(sre_config):
     sre10 = make_sre10_data(data_root, data_loc['SRE10'])
     swbd_c1 = make_swbd_cellular(data_root, data_loc['SWBD_C1'], 1)
     swbd_c2 = make_swbd_cellular(data_root, data_loc['SWBD_C2'], 2)
+    swbd_p1 = make_swbd_phase(data_root, data_loc['SWBD_P1'], 1)
+    swbd_p2 = make_swbd_phase(data_root, data_loc['SWBD_P2'], 2)
+    swbd_p3 = make_swbd_phase(data_root, data_loc['SWBD_P3'], 3)
     print('Sorting sre_swbd data...')
-    return sort_by_index(np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2]).T)
+    return sort_by_index(np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
+                                    swbd_p2, swbd_p3]).T)
 
 
 def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
@@ -229,6 +229,37 @@ def make_swbd_cellular(data_root, data_loc, swbd_type=1):
     return np.vstack([index_list, location_list, channel_list, speaker_list])
 
 
+def make_swbd_phase(data_root, data_loc, phase=1):
+    print('Making swbd phase {} lists...'.format(phase))
+    swbd_loc = join_path(data_root, data_loc)
+
+    stats_key = join_path(swbd_loc, 'docs/callinfo.tbl')
+    swbd_type = 'swbd_p{:d}_'.format(phase)
+
+    file_list = get_file_list_as_dict(swbd_loc)
+
+    index_list = []
+    location_list = []
+    channel_list = []
+    speaker_list = []
+    with open(stats_key, 'r') as f:
+        for line in f.readlines():
+            tokens = re.split('[,]+', line.strip())
+            file_name = ('sw' if phase == 3 else '') + tokens[0]
+            speaker_id = str(tokens[2])
+            channel = 1 if tokens[3] == 'A' else 2
+            try:
+                file_loc = file_list[file_name]
+                index_list.append(swbd_type + file_name + '_ch{:d}'.format(channel))
+                location_list.append(file_loc)
+                channel_list.append(channel)
+                speaker_list.append('sw_' + speaker_id)
+            except KeyError:
+                pass
+
+    return np.vstack([index_list, location_list, channel_list, speaker_list])
+
+
 def make_sre16_eval_data(sre_config):
     print('Making sre2016 eval lists...')
     with open(sre_config, 'r') as f:
@@ -308,19 +339,3 @@ def make_sre16_eval_data(sre_config):
     test_data = np.vstack([index_list, location_list, channel_list, speaker_list, target_list, language_list]).T
 
     return enrollment_data, test_data
-
-
-def make_sre16_unlabeled_data(sre_config):
-    with open(sre_config, 'r') as f:
-        sre_data = load_json(f.read())
-    data_root = sre_data['ROOT']
-    data_loc = sre_data['LOCATION']['SRE16_UNLABELED']
-    sre_loc = join_path(data_root, data_loc)
-
-    file_list = get_file_list(join_path(sre_loc, 'data/unlabeled/major'))
-    index_list = []
-    location_list = []
-    speaker_list = []
-    channel_list = []
-
-    return np.vstack([index_list, location_list, channel_list, speaker_list])

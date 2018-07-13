@@ -32,8 +32,8 @@ logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
     sre_swbd = get_sre_swbd_data(SRE_CONFIG)
-    logger.info('Stage 0: Made {:d} files from sre_swbd.'.format(sre_swbd.shape[0]))
     sre16_eval_enrollment, sre16_eval_test = make_sre16_eval_data(SRE_CONFIG)
+    logger.info('Stage 0: Made {:d} files from sre_swbd.'.format(sre_swbd.shape[0]))
     logger.info('Stage 0: Saving data lists..')
     save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
     save_object(join_path(args.save, 'sre16_eval_enrollment.pkl'), sre16_eval_enrollment)
@@ -72,7 +72,7 @@ else:
     if fail > 0:
         raise Exception('No features for {:d} files. Execute Stage 1 before proceeding.'.format(fail))
     elif sre_swbd.shape[1] < 5:
-        logger.info('Check: Fetching frames...')
+        logger.info('Check: Fetching frames counts...')
         frames = get_mfcc_frames(args.save, sre_swbd[:, 0])
         logger.info('Check: Appending and saving...')
         sre_swbd = np.hstack([sre_swbd, frames])
