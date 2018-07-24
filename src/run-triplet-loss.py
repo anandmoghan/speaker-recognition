@@ -5,10 +5,11 @@ import argparse as ap
 import numpy as np
 
 from models.triplet_model import TripletModel
+from models.x_vector import XVectorModel
 from services.checks import check_mfcc, check_sad, check_embeddings
 from services.common import load_object, run_parallel, save_object
 from services.feature import MFCC, generate_sad_list, get_mfcc_frames
-from services.loader import SRESplitBatchLoader
+from services.loader import SRESplitBatchLoader, SRETestLoader
 from services.logger import Logger
 from services.sre_data import get_sre_swbd_data, make_sre16_eval_data
 
@@ -64,18 +65,21 @@ if args.stage <= 1:
         if fail > 0:
             print('Warning: SAD files not present for {:d} utterances.'.format(fail))
     mfcc = MFCC(fs=args.sample_rate, n_channels=args.num_features, fl=20, fh=3700, n_ceps=40, save_loc=args.save)
+    logger.info('Stage 1: Processing training files...')
     frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre_swbd, n_workers=24, p_bar=(not args.bg))
     frames = np.array(frames).reshape(-1, 1)
     logger.info('Stage 1: {:d} training files processed.'.format(frames.shape[0]))
     sre_swbd = np.hstack([sre_swbd, frames])
     save_object(join_path(args.save, 'sre_swbd.pkl'), sre_swbd)
     logger.info('Stage 1: Train indices saved.')
+    logger.info('Stage 1: Processing enroll files...')
     frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre16_enroll, n_workers=24, p_bar=(not args.bg))
     frames = np.array(frames).reshape(-1, 1)
     logger.info('Stage 1: {:d} Enroll files processed.'.format(frames.shape[0]))
     sre16_enroll = np.hstack([sre16_enroll, frames])
     save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll)
     logger.info('Stage 1: Enroll indices saved.')
+    logger.info('Stage 1: Processing test files...')
     frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre16_test, n_workers=24, p_bar=(not args.bg))
     frames = np.array(frames).reshape(-1, 1)
     logger.info('Stage 1: {:d} Test files processed.'.format(frames.shape[0]))
@@ -84,7 +88,7 @@ if args.stage <= 1:
     logger.info('Stage 1: Test indices saved.')
     logger.end_timer('Stage 1:')
     exit(1)
-elif not args.skip_check:
+elif args.stage < 4 and not args.skip_check:
     logger.start_timer('Check: Looking for features...')
     _, fail1 = check_mfcc(args.save, sre_swbd)
     _, fail2 = check_mfcc(args.save, sre16_enroll)
@@ -116,8 +120,8 @@ elif not args.skip_check:
 if args.stage <= 2:
     logger.start_timer('Stage 2: Pre-processing...')
     logger.info('Stage 2: Filtering out short duration utterances and sorting by duration...')
-    sre_swbd = sre_swbd[np.array(sre_swbd[:, 4], dtype=int) >= 300]
-    sre_swbd = sre_swbd[np.argsort(np.array(sre_swbd[:, 4], dtype=int))]
+    sre_swbd = sre_swbd[np.array(sre_swbd[:, -1], dtype=int) >= 300]
+    sre_swbd = sre_swbd[np.argsort(np.array(sre_swbd[:, -1], dtype=int))]
     logger.info('Stage 2: Filtering out speakers having lesser training data...')
     speakers = sre_swbd[:, 3]
     unique_speakers = set(speakers)
@@ -155,17 +159,27 @@ if args.stage <= 3:
     logger.start_timer('Stage 3: Neural Net Model Training...')
     batch_loader = SRESplitBatchLoader(location=args.save, args=sre_swbd, n_features=args.num_features,
                                        splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
-    model = TripletModel(batch_size=args.batch_size, n_features=args.num_features)
+    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
     model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay)
     logger.end_timer('Stage 3:')
 
 if args.stage <= 4:
     logger.start_timer('Stage 4: Extracting embeddings...')
-    model = TripletModel(batch_size=args.batch_size, n_features=args.num_features)
-    model.extract(args.save, sre16_enroll)
+    args.batch_size = args.batch_size / 2
+    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    logger.info('Stage 4: Processing sre16_enroll...')
+    enroll_loader = SRETestLoader(args.save, sre16_enroll, args.num_features, batch_size=args.batch_size)
+    last_idx = model.extract(args.save, enroll_loader)
+    save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll[:last_idx, :])
+    logger.info('Stage 4: Processing sre16_test...')
+    test_loader = SRETestLoader(args.save, sre16_test, args.num_features, batch_size=args.batch_size)
+    last_idx = model.extract(args.save, test_loader)
+    save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test[:last_idx, :])
     logger.end_timer('Stage 4:')
 elif not args.skip_check:
-    _, fail = check_embeddings(args.save, sre16_enroll)
+    _, fail1 = check_embeddings(args.save, sre16_enroll)
+    _, fail2 = check_embeddings(args.save, sre16_test)
+    fail = fail1 + fail2
     if fail > 0:
         print('No embeddings for {:d} files. Execute Stage 4 before proceeding.'.format(fail))
 

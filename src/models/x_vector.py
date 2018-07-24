@@ -1,12 +1,15 @@
 from os.path import join as join_path
 
 import tensorflow as tf
+import json
 
+from constants.app_constants import EMB_DIR
 from layers.pooling import stats_pool
-from services.common import make_directory, tensorflow_debug
+from services.common import make_directory, save_batch_array, tensorflow_debug, use_gpu
 from services.logger import Logger
 
 tensorflow_debug(False)
+use_gpu(0)
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -21,8 +24,10 @@ CNN_4_OUTPUT_SIZE = 512
 CNN_4_CONTEXT = 1
 CNN_5_OUTPUT_SIZE = 1500
 CNN_5_CONTEXT = 1
+EMBEDDING_SIZE = 512
+DENSE_SIZE = 512
 
-SAVE_TAG = 'xvector'
+MODEL_TAG = 'xvector'
 
 logger = Logger()
 logger.set_config(filename='../logs/run-triplet-loss.log', append=True)
@@ -32,7 +37,7 @@ class XVectorModel:
     def __init__(self, batch_size, n_features, n_classes):
         self.input_ = tf.placeholder(tf.float32, [batch_size, n_features, None])
         self.labels = tf.placeholder(tf.int32, [batch_size, ])
-        self.lr = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.lr = tf.Variable(0.0, dtype=tf.float64, trainable=False)
 
         input_ = tf.reshape(self.input_, [batch_size, n_features, -1, 1])
 
@@ -59,16 +64,43 @@ class XVectorModel:
         stats_output = stats_pool(cnn_output, axes=2)
         stats_output = tf.reshape(stats_output, [batch_size, 2 * CNN_5_OUTPUT_SIZE])
 
-        self.x_vector = tf.layers.dense(stats_output, 512, activation=None)
-        dense_output = tf.layers.dense(tf.nn.relu(self.x_vector), 512, activation=tf.nn.relu)
+        self.x_vector = tf.layers.dense(stats_output, EMBEDDING_SIZE, activation=None)
+        dense_output = tf.layers.dense(tf.nn.relu(self.x_vector), DENSE_SIZE, activation=tf.nn.relu)
         self.logits = tf.layers.dense(dense_output, n_classes, activation=None)
 
         self.loss = tf.losses.sparse_softmax_cross_entropy(self.labels, self.logits)
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
 
+    def extract(self, save_loc, batch_loader):
+        model_loc = join_path(save_loc, 'models')
+        save_json = join_path(model_loc, '{}_latest.json'.format(MODEL_TAG))
+        with open(save_json, 'r') as f:
+            model_json = json.load(f)
+        model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                               .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
+
+        embedding_loc = join_path(save_loc, EMB_DIR)
+        make_directory(embedding_loc)
+
+        saver = tf.train.Saver()
+        with tf.Session(config=config) as sess:
+            print('{}: Restoring Model...'.format(MODEL_TAG))
+            saver.restore(sess, model_path)
+            for b in range(batch_loader.total_batches()):
+                batch_x, args_idx = batch_loader.next()
+                print('{}: Extracting Batch {:d} embeddings...'.format(MODEL_TAG, b + 1))
+                embeddings = sess.run(self.x_vector, feed_dict={
+                    self.input_: batch_x
+                })
+                save_batch_array(embedding_loc, args_idx, embeddings, ext='.npy')
+                print('{}: Saved Batch {:d} embeddings at: {}'.format(MODEL_TAG, b + 1, embedding_loc))
+
+        return batch_loader.get_last_idx()
+
     def start_train(self, save_loc, batch_loader, epochs, lr, decay):
         save_loc = join_path(save_loc, 'models')
         make_directory(save_loc)
+        save_json = join_path(save_loc, '{}_latest.json'.format(MODEL_TAG))
 
         init = tf.global_variables_initializer()
         saver = tf.train.Saver(tf.global_variables(), max_to_keep=10)
@@ -85,8 +117,19 @@ class XVectorModel:
                             self.labels: batch_y,
                             self.lr: current_lr
                         })
-                        logger.info('Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(e + 1, b + 1, loss))
+                        logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(MODEL_TAG, e + 1, b + 1, loss))
                         if (e + 1) * (b + 1) % 100 == 0:
                             model_path = join_path(save_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
-                                                   .format(SAVE_TAG, e + 1, b + 1, loss))
+                                                   .format(MODEL_TAG, e + 1, b + 1, loss))
+                            model_json = {
+                                'e': e,
+                                'b': b,
+                                's': s,
+                                'lr': float(current_lr),
+                                'loss': float(loss)
+                            }
                             saver.save(sess, model_path)
+                            with open(save_json, 'w') as f:
+                                f.write(json.dumps(model_json))
+                            logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.2f}'.format(e + 1, b + 1,
+                                                                                                           loss))

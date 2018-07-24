@@ -67,6 +67,12 @@ def save_array(file_name, obj):
     np.save(file_name, obj)
 
 
+def save_batch_array(location, args_idx, obj, ext='.npy'):
+    for i, arg in enumerate(args_idx):
+        save_loc = os.path.join(location, arg + ext)
+        save_array(save_loc, obj[i])
+
+
 def save_object(file_name, obj):
     with open(file_name, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
@@ -78,3 +84,7 @@ def sort_by_index(args_list):
 
 def tensorflow_debug(debug=False):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' if debug is False else '1'
+
+
+def use_gpu(gpu_id):
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)

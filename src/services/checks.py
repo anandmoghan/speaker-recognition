@@ -1,6 +1,15 @@
 from os.path import join, exists
 
-from constants.app_constants import MFCC_DIR, SAD_DIR
+from constants.app_constants import MFCC_DIR, SAD_DIR, EMB_DIR
+
+
+def check_embeddings(save_loc, args_list):
+    emb_loc = join(save_loc, EMB_DIR)
+    fails = 0
+    for i, args in enumerate(args_list):
+        if not exists(join(emb_loc, args[0] + '.npy')):
+            fails = fails + 1
+    return args_list.shape[0] - fails, fails
 
 
 def check_mfcc(save_loc, args_list):

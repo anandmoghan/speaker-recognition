@@ -13,7 +13,7 @@ class SREBatchLoader:
         self.classes = np.array([speaker_dict[k] for k in args[:, 3]])
         self.feature_idx = np.array(args[:, 0])
         self.n_features = n_features
-        self.frames = np.array(args[:, 4], dtype=int)
+        self.frames = np.array(args[:, -1], dtype=int)
         self.data_len = self.feature_idx.shape[0]
         if not self.data_len == self.classes.shape[0]:
             raise RuntimeError('Length of input and classes does not match.')
@@ -59,7 +59,7 @@ class SREBatchLoader:
 class SRESplitBatchLoader:
     def __init__(self, location, args, n_features, splits, batch_size):
         location = join_path(location, MFCC_DIR)
-        self.frames = np.array(args[:, 4], dtype=int)
+        self.frames = np.array(args[:, -1], dtype=int)
         self.data_len = self.frames.shape[0]
         self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
         self.speakers = args[:, 3]
@@ -82,6 +82,9 @@ class SRESplitBatchLoader:
         self.n_batches = int(len(self.current_split_index) / self.batch_size)
         self.permutation_idx = np.random.permutation(len(self.current_split_index))
         self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size], self.n_batches)
+
+    def get_batch_size(self):
+        return self.batch_size
 
     def next(self):
         current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
@@ -118,6 +121,54 @@ class SRESplitBatchLoader:
         return self.n_batches
 
 
+class SRETestLoader:
+    def __init__(self, location, args, n_features, batch_size):
+        location = join_path(location, MFCC_DIR)
+        self.frames = np.array(args[:, -1], dtype=int)
+        idx = np.argsort(self.frames)
+        args = args[idx]
+        self.frames = self.frames[idx]
+        self.args_idx = args[:, 0]
+        self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
+        self.n_features = n_features
+        self.batch_size = batch_size
+
+        self.batch_pointer = 0
+        self.n_batches = int(self.frames.shape[0] / batch_size)
+        data_len = self.n_batches * batch_size
+        self.batch_splits = np.array_split(np.linspace(0, data_len - 1, data_len, dtype=int), self.n_batches)
+
+    def get_batch_size(self):
+        return self.batch_size
+
+    def get_last_idx(self):
+        return self.n_batches * self.batch_size
+
+    def next(self):
+        if self.batch_pointer == self.n_batches:
+            raise Exception('No batches left.')
+
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        self.batch_pointer = self.batch_pointer + 1
+
+        frames = self.frames[current_batch_idx]
+        frame_len = frames[0]
+        file_loc = self.file_loc[current_batch_idx]
+        np_features = np.zeros([self.batch_size, self.n_features, frame_len])
+        features = run_parallel(load_feature, file_loc, n_workers=6, p_bar=False)
+        for i, f in enumerate(features):
+            f_len = frames[i]
+            if f_len > frame_len:
+                idx = np.random.choice(f_len - frame_len, 1)[0]
+            else:
+                idx = 0
+            np_features[i, :, :] = f[:, idx:(idx + frame_len)]
+        return np_features, self.args_idx[current_batch_idx]
+
+    def total_batches(self):
+        return self.n_batches
+
+
 class OnlineBatchLoader:
     def __init__(self, args_list, feature_extractor, batch_size):
         self.args_list = args_list
@@ -133,6 +184,9 @@ class OnlineBatchLoader:
         self.max_size = self.n_batches * batch_size
         self.permutation_idx = np.random.permutation(self.data_len)
         self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
+
+    def get_batch_size(self):
+        return self.batch_size
 
     def next(self):
         current_split = self.batch_splits[self.batch_pointer]
