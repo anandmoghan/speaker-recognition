@@ -13,6 +13,7 @@
     "SWBD_P1": "SRE2018/LDC2018E48_Comprehensive_Switchboard/LDC98S75",
     "SWBD_P2": "SRE2018/LDC2018E48_Comprehensive_Switchboard/LDC99S79",
     "SWBD_P3": "SRE2018/LDC2018E48_Comprehensive_Switchboard/LDC2002S06",
+    "MX6": "SRE2018/mx6_speech",
     "SRE16_EVAL": "SRE16/R149_0_1",
     "SRE16_UNLABELED": "SRE16/Call_My_Net_Training_Data"
   },
