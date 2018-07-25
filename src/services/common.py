@@ -1,11 +1,22 @@
 from fnmatch import fnmatch
 from tqdm import tqdm
+from os.path import join as join_path
 
 import multiprocessing as mp
 import numpy as np
 import os
 import pickle
 import time
+
+from constants.app_constants import EMB_DIR, MFCC_DIR, MODELS_DIR, SAD_DIR
+
+
+def create_directories(save_loc):
+    make_directory(save_loc)
+    make_directory(join_path(save_loc, SAD_DIR))
+    make_directory(join_path(save_loc, MFCC_DIR))
+    make_directory(join_path(save_loc, MODELS_DIR))
+    make_directory(join_path(save_loc, EMB_DIR))
 
 
 def get_file_list(location, pattern='*.sph'):

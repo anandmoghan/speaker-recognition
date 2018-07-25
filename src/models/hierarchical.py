@@ -3,7 +3,7 @@ from os.path import join as join_path
 
 import tensorflow as tf
 
-from constants.app_constants import EMB_DIR
+from constants.app_constants import EMB_DIR, LATEST_MODEL_FILE, MODELS_DIR
 from lib.triplet_loss import batch_hard_triplet_loss
 from services.common import make_directory, save_batch_array, tensorflow_debug, use_gpu
 from services.logger import Logger
@@ -58,14 +58,14 @@ class HGRUTripletModel:
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
 
     def extract(self, save_loc, batch_loader):
-        model_loc = join_path(save_loc, 'models')
-        save_json = join_path(model_loc, '{}_latest.json'.format(MODEL_TAG))
+        model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
+        save_json = join_path(model_loc, LATEST_MODEL_FILE)
         with open(save_json, 'r') as f:
             model_json = json.load(f)
         model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
 
-        embedding_loc = join_path(save_loc, EMB_DIR)
+        embedding_loc = join_path(join_path(save_loc, EMB_DIR), MODEL_TAG)
         make_directory(embedding_loc)
 
         saver = tf.train.Saver()
@@ -84,9 +84,9 @@ class HGRUTripletModel:
         return batch_loader.get_last_idx()
 
     def start_train(self, save_loc, batch_loader, epochs, lr, decay):
-        save_loc = join_path(save_loc, 'models')
-        make_directory(save_loc)
-        save_json = join_path(save_loc, '{}_latest.json'.format(MODEL_TAG))
+        model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
+        make_directory(model_loc)
+        save_json = join_path(model_loc, LATEST_MODEL_FILE)
 
         init = tf.global_variables_initializer()
         saver = tf.train.Saver(tf.global_variables(), max_to_keep=10)
@@ -104,8 +104,8 @@ class HGRUTripletModel:
                             self.lr: current_lr
                         })
                         logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(MODEL_TAG, e + 1, b + 1, loss))
-                        if (e + 1) * (b + 1) % 100 == 0:
-                            model_path = join_path(save_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                        if (e + 1) * (b + 1) % 200 == 0:
+                            model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                                    .format(MODEL_TAG, e + 1, b + 1, loss))
                             model_json = {
                                 'e': e,

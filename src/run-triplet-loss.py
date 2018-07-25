@@ -4,10 +4,9 @@ from os.path import join as join_path
 import argparse as ap
 import numpy as np
 
-from models.triplet_model import TripletModel
 from models.x_vector import XVectorModel
 from services.checks import check_mfcc, check_sad, check_embeddings
-from services.common import load_object, run_parallel, save_object
+from services.common import create_directories, load_object, run_parallel, save_object
 from services.feature import MFCC, generate_sad_list, get_mfcc_frames
 from services.loader import SRESplitBatchLoader, SRETestLoader
 from services.logger import Logger
@@ -30,6 +29,8 @@ args = parser.parse_args()
 
 logger = Logger()
 logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
+
+create_directories(args.save)
 
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
