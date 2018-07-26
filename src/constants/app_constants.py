@@ -1,5 +1,6 @@
 KALDI_PATH_FILE = './path.sh'
 
+DATA_DIR = 'data'
 EMB_DIR = 'embeddings'
 MFCC_DIR = 'mfcc'
 MODELS_DIR = 'models'

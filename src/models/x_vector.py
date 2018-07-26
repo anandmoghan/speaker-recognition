@@ -4,7 +4,7 @@ import tensorflow as tf
 import json
 
 from constants.app_constants import EMB_DIR, LATEST_MODEL_FILE, MODELS_DIR
-from layers.pooling import stats_pool
+from models.layers.stats_pooling import stats_pool
 from services.common import make_directory, save_batch_array, tensorflow_debug, use_gpu
 from services.logger import Logger
 

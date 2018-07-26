@@ -4,10 +4,12 @@ from os.path import join as join_path
 import numpy as np
 import re
 
-from services.common import get_file_list_as_dict, remove_duplicates, sort_by_index
+from constants.app_constants import DATA_DIR
+from services.common import create_wav, get_file_list_as_dict, remove_duplicates, sort_by_index
 
 
-def get_train_data(data_config):
+def get_train_data(save_loc, data_config):
+    store_loc = join_path(save_loc, DATA_DIR)
     with open(data_config, 'r') as f:
         sre_data = load_json(f.read())
     data_root = sre_data['ROOT']
@@ -25,9 +27,13 @@ def get_train_data(data_config):
     swbd_p1 = make_swbd_phase(data_root, data_loc['SWBD_P1'], 1)
     swbd_p2 = make_swbd_phase(data_root, data_loc['SWBD_P2'], 2)
     swbd_p3 = make_swbd_phase(data_root, data_loc['SWBD_P3'], 3)
-    mx6 = make_mixer6(data_root, data_loc['MX6'])
+    mx6_calls = make_mixer6_calls(data_root, data_loc['MX6'])
+    mx6_mic = make_mixer6_mic(data_root, data_loc['MX6'])
+    mx6_loc = join_path(store_loc, 'mx6')
+    print('Converting mx6 flac to wav...')
+    mx6_mic = create_wav(mx6_loc, mx6_mic.T)
     train_data = np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
-                                    swbd_p2, swbd_p3, mx6]).T
+                                    swbd_p2, swbd_p3, mx6_calls, mx6_mic.T]).T
     print('Removing Duplicates...')
     train_data, n_dup = remove_duplicates(train_data)
     print('Removed {} duplicates.'.format(n_dup))
@@ -280,11 +286,10 @@ def make_swbd_phase(data_root, data_loc, phase=1):
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
-def make_mixer6(data_root, data_loc):
-    print('Making mixer6 lists...')
+def make_mixer6_calls(data_root, data_loc):
+    print('Making mixer6 calls lists...')
     mx6_loc = join_path(data_root, data_loc)
     mx6_calls_loc = join_path(mx6_loc, 'data/ulaw_sphere')
-    mx6_mic_loc = join_path(mx6_loc, 'data/pcm_flac')
 
     stats_key = join_path(mx6_loc, 'docs/mx6_calls.csv')
     file_list = get_file_list_as_dict(mx6_calls_loc)
@@ -320,6 +325,14 @@ def make_mixer6(data_root, data_loc):
                 read_list.append('sph2pipe -f wav -p -c 2 {}'.format(file_loc))
             except KeyError:
                 pass
+    print('Made {:d} files from mixer6 calls.'.format(len(index_list)))
+    return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
+
+
+def make_mixer6_mic(data_root, data_loc):
+    print('Making mixer6 mic lists...')
+    mx6_loc = join_path(data_root, data_loc)
+    mx6_mic_loc = join_path(mx6_loc, 'data/pcm_flac')
 
     stats_key = join_path(mx6_loc, 'docs/mx6_ivcomponents.csv')
     file_list = dict()
@@ -329,11 +342,11 @@ def make_mixer6(data_root, data_loc):
         mic_file_list = get_file_list_as_dict(mic_loc, pattern='*.flac')
         file_list = {**mic_file_list, **file_list}
 
-    session_to_file = dict()
-    for key in file_list:
-        session_id = key[:-5]
-        session_to_file[session_id] = key
-
+    index_list = []
+    location_list = []
+    channel_list = []
+    speaker_list = []
+    read_list = []
     with open(stats_key, 'r') as f:
         for line in f.readlines()[1:]:
             tokens = re.split('[,]+', line.strip())
@@ -341,18 +354,20 @@ def make_mixer6(data_root, data_loc):
             speaker_id = re.split('[_]+', session_id)[3]
             start_time = tokens[7]
             end_time = tokens[8]
-            try:
-                file_name = session_to_file[session_id]
-                file_loc = file_list[file_name]
-                index_list.append('MX6_MIC_{}'.format(file_name))
-                location_list.append(file_loc)
-                channel_list.append(1)
-                speaker_list.append('MX6_{}'.format(speaker_id))
-                read_list.append('sox -t flac {} -r 8k -t wav - trim {} ={}'.format(file_loc, start_time, end_time))
-            except KeyError:
-                pass
+            for idx in mic_idx:
+                file_name = '{}_CH{}'.format(session_id, idx)
+                try:
+                    file_loc = file_list[file_name]
+                    index_list.append('MX6_MIC_{}'.format(file_name))
+                    location_list.append(file_loc)
+                    channel_list.append(1)
+                    speaker_list.append('MX6_{}'.format(speaker_id))
+                    read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
+                                     .format(file_loc, start_time, float(end_time) - float(start_time)))
+                except KeyError:
+                    pass
 
-    print('Made {:d} files from mixer6.'.format(len(index_list)))
+    print('Made {:d} files from mixer6 mic.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 

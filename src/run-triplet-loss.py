@@ -34,7 +34,7 @@ create_directories(args.save)
 
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
-    train_data = get_train_data(DATA_CONFIG)
+    train_data = get_train_data(args.save, DATA_CONFIG)
     logger.info('Stage 0: Made {:d} files for training.'.format(train_data.shape[0]))
     sre16_enroll, sre16_test = make_sre16_eval_data(DATA_CONFIG)
     logger.info('Stage 0: Saving data lists..')

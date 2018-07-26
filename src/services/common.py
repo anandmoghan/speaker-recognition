@@ -1,4 +1,6 @@
 from fnmatch import fnmatch
+from subprocess import Popen, PIPE
+
 from tqdm import tqdm
 from os.path import join as join_path
 
@@ -8,15 +10,37 @@ import os
 import pickle
 import time
 
-from constants.app_constants import EMB_DIR, MFCC_DIR, MODELS_DIR, SAD_DIR
+from constants.app_constants import DATA_DIR, EMB_DIR, MFCC_DIR, MODELS_DIR, SAD_DIR
 
 
 def create_directories(save_loc):
     make_directory(save_loc)
+    make_directory(join_path(save_loc, DATA_DIR))
     make_directory(join_path(save_loc, SAD_DIR))
     make_directory(join_path(save_loc, MFCC_DIR))
     make_directory(join_path(save_loc, MODELS_DIR))
     make_directory(join_path(save_loc, EMB_DIR))
+
+
+def create_wav(save_loc, args):
+    make_directory(save_loc)
+    wav_file_loc = [join_path(save_loc, '{}.wav'.format(a)) for a in args[:, 0]]
+    print('Checking if files exist...')
+    result = run_parallel(os.path.exists, wav_file_loc, n_workers=20)
+    present = np.sum(np.array(result, dtype=int))
+    print('{} files present.'.format(present))
+    absent = args.shape[0] - present
+    if absent > 0:
+        result = np.invert(result)
+        convert_cmd = np.array(['{} > {}'.format(cmd, wav_file_loc[i]) for i, cmd in enumerate(args[:, 4])])
+        convert_cmd = convert_cmd[result]
+        print('Converting...')
+        result = run_parallel(run_command, convert_cmd, n_workers=20)
+        converted = np.sum(np.array(result, dtype=int))
+        print('Converted {} files to wav.'.format(converted))
+    args[:, 1] = wav_file_loc
+    args[:, 4] = ['cat {}'.format(l) for l in wav_file_loc]
+    return args
 
 
 def get_file_list(location, pattern='*.sph'):
@@ -53,6 +77,15 @@ def load_object(file_name):
 def make_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
+
+
+def run_command(cmd):
+    p = Popen(cmd, stdout=PIPE, shell=True)
+    _, error_output = p.communicate()
+    if error_output is not None:
+        print(error_output)
+        return False
+    return True
 
 
 def put_time_stamp(text):
