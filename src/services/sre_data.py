@@ -4,7 +4,7 @@ from os.path import join as join_path
 import numpy as np
 import re
 
-from services.common import get_file_list_as_dict, sort_by_index
+from services.common import get_file_list_as_dict, remove_duplicates, sort_by_index
 
 
 def get_train_data(data_config):
@@ -26,9 +26,13 @@ def get_train_data(data_config):
     swbd_p2 = make_swbd_phase(data_root, data_loc['SWBD_P2'], 2)
     swbd_p3 = make_swbd_phase(data_root, data_loc['SWBD_P3'], 3)
     mx6 = make_mixer6(data_root, data_loc['MX6'])
-    print('Sorting train data...')
-    return sort_by_index(np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
-                                    swbd_p2, swbd_p3, mx6]).T)
+    train_data = np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
+                                    swbd_p2, swbd_p3, mx6]).T
+    print('Removing Duplicates...')
+    train_data, n_dup = remove_duplicates(train_data)
+    print('Removed {} duplicates.'.format(n_dup))
+    print('Sorting train data by index...')
+    return sort_by_index(train_data)
 
 
 def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
@@ -54,19 +58,19 @@ def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
             tokens = re.split('[\s]+', line.strip())
             speaker_id = tokens[0]
             file_name = tokens[3]
-            channel = tokens[4]
+            channel = 1 if tokens[4] == 'A' else 2
             if sre_year == tokens[2]:
                 try:
                     file_loc = file_list[file_name]
-                    index_list.append(sre_year + '_' + file_name)
+                    index_list.append('{}_{}_ch{}'.format(sre_year, file_name, channel))
                     location_list.append(file_loc)
                     speaker_list.append(sre_year + '_' + speaker_id)
-                    channel_list.append(1 if channel == 'A' else 2)
+                    channel_list.append(channel)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
-                    del file_list[file_name]
                 except KeyError:
                     pass
 
+    print('Made {:d} files from {}.'.format(len(index_list), sre_year))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
@@ -93,17 +97,16 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
             tokens = re.split('[,:]+', line.strip())
             model_id = tokens[0]
             file_name = tokens[2]
-            channel = tokens[3]
+            channel = 1 if tokens[3] == 'a' else 2
             speaker_id = tokens[4]
             model_to_speaker[model_id] = speaker_id
             try:
                 file_loc = file_list[file_name]
-                index_list.append('sre2008_' + file_name)
+                index_list.append('sre2008_{}_ch{}'.format(file_name, channel))
                 location_list.append(file_loc)
-                channel_list.append(1 if channel == 'a' else 2)
+                channel_list.append(channel)
                 speaker_list.append('sre2008_' + speaker_id)
                 read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
-                del file_list[file_name]
             except KeyError:
                 pass
 
@@ -112,21 +115,22 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
             tokens = re.split('[,]+', line.strip())
             model_id = tokens[0]
             file_name = tokens[1]
-            channel = tokens[2]
+            channel = 1 if tokens[2] == 'a' else 2
             target_type = tokens[3]
             try:
                 file_loc = file_list[file_name]
                 speaker_id = model_to_speaker[model_id]
                 if target_type == 'target':
-                    index_list.append('sre2008_' + file_name)
+                    index_list.append('sre2008_{}_ch{}'.format(file_name, channel))
                     location_list.append(file_loc)
-                    channel_list.append(1 if channel == 'a' else 2)
+                    channel_list.append(channel)
                     speaker_list.append('sre2008_' + speaker_id)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
                     del file_list[file_name]
             except KeyError:
                 pass
 
+    print('Made {:d} files from sre2008.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
@@ -159,16 +163,15 @@ def make_sre10_data(data_root, data_loc):
             tokens = re.split('[\s:]+', line.strip())
             model_id = tokens[0]
             file_name = tokens[2].split('/')[2].split('.sph')[0]
-            channel = tokens[3]
+            channel = 1 if tokens[3] == 'A' else 2
             try:
                 file_loc = file_list[file_name]
                 speaker_id = model_to_speaker[model_id]
-                index_list.append('sre2010_' + file_name)
+                index_list.append('sre2010_{}_ch{}'.format(file_name, channel))
                 location_list.append(file_loc)
                 speaker_list.append('sre2010_' + speaker_id)
-                channel_list.append(1 if channel == 'A' else 2)
+                channel_list.append(channel)
                 read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
-                del file_list[file_name]
             except KeyError:
                 pass
 
@@ -177,31 +180,32 @@ def make_sre10_data(data_root, data_loc):
             tokens = re.split('[,]+', line.strip())
             model_id = tokens[0]
             file_name = tokens[1]
-            channel = tokens[2]
+            channel = 1 if tokens[2] == 'A' else 2
             target_type = tokens[3]
             try:
                 speaker_id = model_to_speaker[model_id]
                 file_loc = file_list[file_name]
                 if target_type == 'target':
-                    index_list.append('sre2010_' + file_name)
+                    index_list.append('sre2010_{}_ch{}'.format(file_name, channel))
                     location_list.append(file_loc)
                     speaker_list.append('sre2010_' + speaker_id)
-                    channel_list.append(1 if channel == 'A' else 2)
+                    channel_list.append(channel)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
                     del file_list[file_name]
             except KeyError:
                 pass
 
+    print('Made {:d} files from sre2010.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
-def make_swbd_cellular(data_root, data_loc, swbd_type=1):
-    print('Making swbd cellular {} lists...'.format(swbd_type))
+def make_swbd_cellular(data_root, data_loc, cellular=1):
+    print('Making swbd cellular {} lists...'.format(cellular))
     swbd_loc = join_path(data_root, data_loc)
 
     bad_audio = [40019, 45024, 40022]
-    stats_key = join_path(swbd_loc, 'doc{}/swb_callstats.tbl'.format('' if swbd_type == 1 else 's'))
-    swbd_type = 'swbd_c{:d}_'.format(swbd_type)
+    stats_key = join_path(swbd_loc, 'doc{}/swb_callstats.tbl'.format('' if cellular == 1 else 's'))
+    swbd_type = 'swbd_c{:d}_'.format(cellular)
 
     file_list = get_file_list_as_dict(swbd_loc)
 
@@ -238,6 +242,7 @@ def make_swbd_cellular(data_root, data_loc, swbd_type=1):
             except KeyError:
                 pass
 
+    print('Made {:d} files swbd cellular {}.'.format(len(index_list), cellular))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
@@ -258,7 +263,7 @@ def make_swbd_phase(data_root, data_loc, phase=1):
     with open(stats_key, 'r') as f:
         for line in f.readlines():
             tokens = re.split('[,]+', line.strip())
-            file_name = ('sw' if phase == 3 else '') + tokens[0]
+            file_name = ('sw_' + tokens[0]) if phase == 3 else ('' + tokens[0].split('.')[0])
             speaker_id = str(tokens[2])
             channel = 1 if tokens[3] == 'A' else 2
             try:
@@ -271,6 +276,7 @@ def make_swbd_phase(data_root, data_loc, phase=1):
             except KeyError:
                 pass
 
+    print('Made {:d} files swbd phase {}.'.format(len(index_list), phase))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
@@ -346,6 +352,7 @@ def make_mixer6(data_root, data_loc):
             except KeyError:
                 pass
 
+    print('Made {:d} files from mixer6.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
@@ -382,6 +389,7 @@ def make_sre16_eval_data(sre_config):
             except KeyError:
                 pass
 
+    print('Made {:d} enrollment files.'.format(len(index_list)))
     enrollment_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
 
     file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'))
@@ -429,6 +437,7 @@ def make_sre16_eval_data(sre_config):
             except KeyError:
                 pass
 
+    print('Made {:d} test files.'.format(len(index_list)))
     test_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list, target_list,
                            language_list]).T
 

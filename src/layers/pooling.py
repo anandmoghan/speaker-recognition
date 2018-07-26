@@ -1,8 +1,0 @@
-import tensorflow as tf
-
-
-def stats_pool(x, axes=1):
-    mean, variance = tf.nn.moments(x, axes)
-    return tf.concat([mean, tf.sqrt(variance)], 1)
-
-

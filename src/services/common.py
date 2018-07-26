@@ -59,6 +59,11 @@ def put_time_stamp(text):
     return time.strftime(' %b %d, %Y %l:%M:%S%p - ') + text
 
 
+def remove_duplicates(args):
+    _, unique_idx = np.unique(args[:, 0], return_index=True)
+    return args[unique_idx, :], args.shape[0] - len(unique_idx)
+
+
 def run_parallel(func, args_list, n_workers=10, p_bar=True):
     pool = mp.Pool(n_workers)
     if p_bar:
