@@ -1,96 +1,88 @@
 from collections import Counter
-from os.path import join as join_path
+from os.path import join as join_path, abspath
 
 import argparse as ap
 import numpy as np
 
+from constants.app_constants import DATA_DIR, DATA_SCP_FILE, FEATS_SCP_FILE, VAD_SCP_FILE
 from models.x_vector import XVectorModel
-from services.checks import check_mfcc, check_sad, check_embeddings
-from services.common import create_directories, load_object, run_parallel, save_object
-from services.feature import MFCC, generate_sad_list, get_mfcc_frames
-from services.loader import SRESplitBatchLoader, SRETestLoader
+from services.checks import check_embeddings, check_mfcc
+from services.common import create_directories, load_object, save_object
+from services.feature import MFCC, VAD, add_frames_to_args, apply_vad_and_save, generate_data_scp, get_mfcc_frames
+from services.loader import SRETestLoader, SRESplitBatchLoader
 from services.logger import Logger
 from services.sre_data import get_train_data, make_sre16_eval_data
 
 DATA_CONFIG = '../configs/sre_data.json'
 
 parser = ap.ArgumentParser()
-parser.add_argument('--bg', action="store_true", default=False, help='Background Option')
 parser.add_argument('--batch-size', type=int, default=64, help='Batch Size')
 parser.add_argument('--decay', type=float, default=0.6, help='Learning Rate')
 parser.add_argument('--epochs', type=int, default=50, help='Number of Epochs')
 parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
-parser.add_argument('--num-features', type=int, default=24, help='Batch Size')
+parser.add_argument('--num-features', type=int, default=20, help='Batch Size')
 parser.add_argument('--sample-rate', type=int, default=8000, help='Sampling Rate')
 parser.add_argument('--save', default='../save', help='Save Location')
 parser.add_argument('-sc', '--skip-check', action="store_true", default=False, help='Skip Check')
-parser.add_argument('--stage', type=int, default=3, help='Set Stage')
+parser.add_argument('--stage', type=int, default=0, help='Set Stage')
 args = parser.parse_args()
 
 logger = Logger()
 logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
 
+args.save = abspath(args.save)
+data_loc = join_path(args.save, DATA_DIR)
 create_directories(args.save)
 
 if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
-    train_data = get_train_data(args.save, DATA_CONFIG)
+    train_data = get_train_data(DATA_CONFIG)
     logger.info('Stage 0: Made {:d} files for training.'.format(train_data.shape[0]))
     sre16_enroll, sre16_test = make_sre16_eval_data(DATA_CONFIG)
     logger.info('Stage 0: Saving data lists..')
-    save_object(join_path(args.save, 'train_data.pkl'), train_data)
-    save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll)
-    save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test)
+    save_object(join_path(data_loc, 'train_data.pkl'), train_data)
+    save_object(join_path(data_loc, 'sre16_enroll.pkl'), sre16_enroll)
+    save_object(join_path(data_loc, 'sre16_test.pkl'), sre16_test)
     # TODO: Make sre2016 unlabeled data
-    logger.info('Stage 0: Data lists saved at: {}'.format(args.save))
-    logger.info('Stage 0: Generating SAD list file.')
-    generate_sad_list(args.save, train_data)
-    generate_sad_list(args.save, sre16_enroll, append=True)
-    generate_sad_list(args.save, sre16_test, append=True)
-    logger.info('Stage 0: Saved SAD list file at: {}'.format(args.save))
+    logger.info('Stage 0: Data lists saved at: {}'.format(data_loc))
     logger.end_timer('Stage 0:')
 else:
-    logger.start_timer('Load: Data lists from: {}'.format(args.save))
-    train_data = load_object(join_path(args.save, 'train_data.pkl'))
-    sre16_enroll = load_object(join_path(args.save, 'sre16_enroll.pkl'))
-    sre16_test = load_object(join_path(args.save, 'sre16_test.pkl'))
+    logger.start_timer('Load: Data lists from: {}'.format(data_loc))
+    train_data = load_object(join_path(data_loc, 'train_data.pkl'))
+    sre16_enroll = load_object(join_path(data_loc, 'sre16_enroll.pkl'))
+    sre16_test = load_object(join_path(data_loc, 'sre16_test.pkl'))
     logger.end_timer('Load:')
 
-exit(1)
-
 if args.stage <= 1:
-    logger.start_timer('Stage 1: Extracting Features...')
-    if not args.skip_check:
-        _, fail1 = check_sad(args.save, train_data)
-        _, fail2 = check_sad(args.save, sre16_enroll)
-        _, fail3 = check_sad(args.save, sre16_test)
-        fail = fail1 + fail2 + fail3
-        if fail > 0:
-            print('Warning: SAD files not present for {:d} utterances.'.format(fail))
-    mfcc = MFCC(fs=args.sample_rate, n_channels=args.num_features, fl=20, fh=3700, n_ceps=40, save_loc=args.save)
-    logger.info('Stage 1: Processing training files...')
-    frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, train_data, n_workers=24, p_bar=(not args.bg))
-    frames = np.array(frames).reshape(-1, 1)
-    logger.info('Stage 1: {:d} training files processed.'.format(frames.shape[0]))
-    train_data = np.hstack([train_data, frames])
-    save_object(join_path(args.save, 'train_data.pkl'), train_data)
-    logger.info('Stage 1: Train indices saved.')
-    logger.info('Stage 1: Processing enroll files...')
-    frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre16_enroll, n_workers=24, p_bar=(not args.bg))
-    frames = np.array(frames).reshape(-1, 1)
-    logger.info('Stage 1: {:d} Enroll files processed.'.format(frames.shape[0]))
-    sre16_enroll = np.hstack([sre16_enroll, frames])
-    save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll)
-    logger.info('Stage 1: Enroll indices saved.')
-    logger.info('Stage 1: Processing test files...')
-    frames = run_parallel(mfcc.extract_sph_file_with_sad_and_cmvn, sre16_test, n_workers=24, p_bar=(not args.bg))
-    frames = np.array(frames).reshape(-1, 1)
-    logger.info('Stage 1: {:d} Test files processed.'.format(frames.shape[0]))
-    sre16_test = np.hstack([sre16_test, frames])
-    save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test)
-    logger.info('Stage 1: Test indices saved.')
-    logger.end_timer('Stage 1:')
-    exit(1)
+    logger.start_timer('Stage 1: Feature Extraction.')
+    logger.info('Stage 1: Generating data scp file...')
+    generate_data_scp(args.save, train_data)
+    generate_data_scp(args.save, sre16_enroll, append=True)
+    generate_data_scp(args.save, sre16_test, append=True)
+    logger.info('Stage 1: Saved data scp file at: {}'.format(data_loc))
+
+    mfcc = MFCC(fs=args.sample_rate, fl=20, fh=3700, frame_len_ms=25, n_ceps=args.num_features, n_jobs=20,
+                save_loc=args.save)
+    vad = VAD(n_jobs=20, save_loc=args.save)
+    logger.info('Stage 1: Extracting raw mfcc features...')
+    data_scp_file = join_path(args.save, DATA_SCP_FILE)
+    mfcc.extract(data_scp_file)
+    logger.info('Stage 1: Computing VAD...')
+    feats_scp_file = join_path(args.save, FEATS_SCP_FILE)
+    vad.compute(feats_scp_file)
+    logger.info('Stage 1: Applying VAD...')
+    vad_scp_file = join_path(args.save, VAD_SCP_FILE)
+    frame_dict = apply_vad_and_save(feats_scp_file, vad_scp_file, 24, args.save)
+    logger.info('Stage 1: Appending Frame counts..')
+    train_data = add_frames_to_args(train_data, frame_dict)
+    sre16_enroll = add_frames_to_args(sre16_enroll, frame_dict)
+    sre16_test = add_frames_to_args(sre16_test, frame_dict)
+    logger.info('Stage 1: Updating data lists..')
+    save_object(join_path(data_loc, 'train_data.pkl'), train_data)
+    save_object(join_path(data_loc, 'sre16_enroll.pkl'), sre16_enroll)
+    save_object(join_path(data_loc, 'sre16_test.pkl'), sre16_test)
+    logger.info('Stage 1: Data lists saved at: {}'.format(data_loc))
+    logger.end_timer()
 elif args.stage < 4 and not args.skip_check:
     logger.start_timer('Check: Looking for features...')
     _, fail1 = check_mfcc(args.save, train_data)

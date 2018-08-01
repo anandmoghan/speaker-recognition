@@ -190,7 +190,7 @@ class OnlineBatchLoader:
 
     def next(self):
         current_split = self.batch_splits[self.batch_pointer]
-        features = run_parallel(self.feature_extractor.extract_sph_file_with_sad_and_cmvn,
+        features = run_parallel(self.feature_extractor.extract_piped_file_with_sad_and_cmvn,
                                 args_list=self.args_list[current_split], n_workers=10, p_bar=False)
         feature_len = features[0].shape[0]
         frames_list = [f.shape[1] for f in features]

@@ -10,13 +10,13 @@ import os
 import pickle
 import time
 
-from constants.app_constants import DATA_DIR, EMB_DIR, MFCC_DIR, MODELS_DIR, SAD_DIR
+from constants.app_constants import DATA_DIR, EMB_DIR, MFCC_DIR, MODELS_DIR, VAD_DIR
 
 
 def create_directories(save_loc):
     make_directory(save_loc)
     make_directory(join_path(save_loc, DATA_DIR))
-    make_directory(join_path(save_loc, SAD_DIR))
+    make_directory(join_path(save_loc, VAD_DIR))
     make_directory(join_path(save_loc, MFCC_DIR))
     make_directory(join_path(save_loc, MODELS_DIR))
     make_directory(join_path(save_loc, EMB_DIR))
@@ -79,15 +79,6 @@ def make_directory(path):
         os.makedirs(path)
 
 
-def run_command(cmd):
-    p = Popen(cmd, stdout=PIPE, shell=True)
-    _, error_output = p.communicate()
-    if error_output is not None:
-        print(error_output)
-        return False
-    return True
-
-
 def put_time_stamp(text):
     return time.strftime(' %b %d, %Y %l:%M:%S%p - ') + text
 
@@ -95,6 +86,11 @@ def put_time_stamp(text):
 def remove_duplicates(args):
     _, unique_idx = np.unique(args[:, 0], return_index=True)
     return args[unique_idx, :], args.shape[0] - len(unique_idx)
+
+
+def run_command(cmd):
+    output, error = Popen(cmd, stdout=PIPE, shell=True).communicate()
+    return output.decode("utf-8"), error.decode("utf-8") if error is not None else error
 
 
 def run_parallel(func, args_list, n_workers=10, p_bar=True):

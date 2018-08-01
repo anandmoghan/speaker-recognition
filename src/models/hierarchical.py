@@ -94,9 +94,10 @@ class HGRUTripletModel:
             sess.run(init)
             for s in [0, 1, 2]:
                 batch_loader.set_split(s)
+                n_batches = batch_loader.total_batches()
                 for e in range(epochs):
                     current_lr = lr * (decay ** e)
-                    for b in range(batch_loader.total_batches()):
+                    for b in range(n_batches):
                         batch_x, batch_y = batch_loader.next()
                         _, loss = sess.run([self.optimizer, self.loss], feed_dict={
                             self.input_: batch_x,
@@ -104,7 +105,7 @@ class HGRUTripletModel:
                             self.lr: current_lr
                         })
                         logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(MODEL_TAG, e + 1, b + 1, loss))
-                        if (e + 1) * (b + 1) % 200 == 0:
+                        if (e * n_batches + b + 1) % 200 == 0:
                             model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                                    .format(MODEL_TAG, e + 1, b + 1, loss))
                             model_json = {

@@ -5,11 +5,10 @@ import numpy as np
 import re
 
 from constants.app_constants import DATA_DIR
-from services.common import create_wav, get_file_list_as_dict, remove_duplicates, sort_by_index
+from services.common import get_file_list_as_dict, remove_duplicates, sort_by_index
 
 
-def get_train_data(save_loc, data_config):
-    store_loc = join_path(save_loc, DATA_DIR)
+def get_train_data(data_config):
     with open(data_config, 'r') as f:
         sre_data = load_json(f.read())
     data_root = sre_data['ROOT']
@@ -29,11 +28,8 @@ def get_train_data(save_loc, data_config):
     swbd_p3 = make_swbd_phase(data_root, data_loc['SWBD_P3'], 3)
     mx6_calls = make_mixer6_calls(data_root, data_loc['MX6'])
     mx6_mic = make_mixer6_mic(data_root, data_loc['MX6'])
-    mx6_loc = join_path(store_loc, 'mx6')
-    print('Converting mx6 flac to wav...')
-    mx6_mic = create_wav(mx6_loc, mx6_mic.T)
     train_data = np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
-                                    swbd_p2, swbd_p3, mx6_calls, mx6_mic.T]).T
+                            swbd_p2, swbd_p3, mx6_calls, mx6_mic]).T
     print('Removing Duplicates...')
     train_data, n_dup = remove_duplicates(train_data)
     print('Removed {} duplicates.'.format(n_dup))
