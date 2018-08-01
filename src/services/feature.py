@@ -32,7 +32,7 @@ class MFCC:
         self.params_file = params_file
 
     def extract(self, data_scp):
-        return run_command('./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
+        return run_command('sh ./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
 
 
 class VAD:
@@ -53,7 +53,7 @@ class VAD:
         self.params_file = params_file
 
     def compute(self, feats_scp):
-        return run_command('./kaldi/compute_vad.sh {} {}'.format(feats_scp, self.params_file))
+        return run_command('sh ./kaldi/compute_vad.sh {} {}'.format(feats_scp, self.params_file))
 
 
 def add_frames_to_args(args_list, frame_dict):

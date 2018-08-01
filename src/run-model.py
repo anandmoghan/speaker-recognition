@@ -28,7 +28,7 @@ parser.add_argument('--stage', type=int, default=0, help='Set Stage')
 args = parser.parse_args()
 
 logger = Logger()
-logger.set_config(filename='../logs/run-triplet-loss.log', append=False)
+logger.set_config(filename='/logs/run-triplet-loss.log', append=False)
 
 args.save = abspath(args.save)
 data_loc = join_path(args.save, DATA_DIR)
