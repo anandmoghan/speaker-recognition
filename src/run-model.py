@@ -5,10 +5,10 @@ import argparse as ap
 import numpy as np
 
 from constants.app_constants import DATA_DIR, DATA_SCP_FILE, FEATS_SCP_FILE, VAD_SCP_FILE
-from models.x_vector import XVectorModel
+from models.hierarchical import HGRUTripletModel
 from services.checks import check_embeddings, check_mfcc
 from services.common import create_directories, load_object, save_object
-from services.feature import MFCC, VAD, add_frames_to_args, apply_vad_and_save, generate_data_scp, get_mfcc_frames
+from services.feature import MFCC, VAD, generate_data_scp, get_mfcc_frames, remove_present_from_scp
 from services.loader import SRETestLoader, SRESplitBatchLoader
 from services.logger import Logger
 from services.sre_data import get_train_data, make_sre16_eval_data
@@ -21,6 +21,7 @@ parser.add_argument('--decay', type=float, default=0.6, help='Learning Rate')
 parser.add_argument('--epochs', type=int, default=50, help='Number of Epochs')
 parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
 parser.add_argument('--num-features', type=int, default=20, help='Batch Size')
+parser.add_argument('--num-jobs', type=int, default=20, help='Batch Size')
 parser.add_argument('--sample-rate', type=int, default=8000, help='Sampling Rate')
 parser.add_argument('--save', default='../save', help='Save Location')
 parser.add_argument('-sc', '--skip-check', action="store_true", default=False, help='Skip Check')
@@ -59,24 +60,34 @@ if args.stage <= 1:
     generate_data_scp(args.save, train_data)
     generate_data_scp(args.save, sre16_enroll, append=True)
     generate_data_scp(args.save, sre16_test, append=True)
+    logger.info('Stage 1: Removing already present files from data scp file...')
+    count = remove_present_from_scp(args.save, n_jobs=args.num_jobs)
     logger.info('Stage 1: Saved data scp file at: {}'.format(data_loc))
 
-    mfcc = MFCC(fs=args.sample_rate, fl=20, fh=3700, frame_len_ms=25, n_ceps=args.num_features, n_jobs=20,
-                save_loc=args.save)
-    vad = VAD(n_jobs=20, save_loc=args.save)
-    logger.info('Stage 1: Extracting raw mfcc features...')
-    data_scp_file = join_path(args.save, DATA_SCP_FILE)
-    mfcc.extract(data_scp_file)
-    logger.info('Stage 1: Computing VAD...')
-    feats_scp_file = join_path(args.save, FEATS_SCP_FILE)
-    vad.compute(feats_scp_file)
-    logger.info('Stage 1: Applying VAD...')
-    vad_scp_file = join_path(args.save, VAD_SCP_FILE)
-    frame_dict = apply_vad_and_save(feats_scp_file, vad_scp_file, 24, args.save)
+    if count > 0:
+        n_jobs = count if count < args.num_jobs else args.num_jobs
+        mfcc = MFCC(fs=args.sample_rate, fl=20, fh=3700, frame_len_ms=25, n_ceps=args.num_features, n_jobs=n_jobs,
+                    save_loc=args.save)
+        vad = VAD(n_jobs=n_jobs, save_loc=args.save)
+        logger.info('Stage 1: Extracting raw mfcc features for {} file(s)...'.format(count))
+        data_scp_file = join_path(args.save, DATA_SCP_FILE)
+        mfcc.extract(data_scp_file)
+        logger.info('Stage 1: Computing VAD...')
+        feats_scp_file = join_path(args.save, FEATS_SCP_FILE)
+        vad.compute(feats_scp_file)
+        logger.info('Stage 1: Applying VAD...')
+        vad_scp_file = join_path(args.save, VAD_SCP_FILE)
+        mfcc.apply_vad_and_save(feats_scp_file, vad_scp_file)
+    else:
+        logger.info('Stage 1: All files has features.')
+
     logger.info('Stage 1: Appending Frame counts..')
-    train_data = add_frames_to_args(train_data, frame_dict)
-    sre16_enroll = add_frames_to_args(sre16_enroll, frame_dict)
-    sre16_test = add_frames_to_args(sre16_test, frame_dict)
+    frames = get_mfcc_frames(args.save, train_data[:, 0], args.num_jobs)
+    train_data = np.hstack([train_data, frames])
+    frames = get_mfcc_frames(args.save, sre16_enroll[:, 0], args.num_jobs)
+    sre16_enroll = np.hstack([sre16_enroll, frames])
+    frames = get_mfcc_frames(args.save, sre16_test[:, 0], args.num_jobs)
+    sre16_test = np.hstack([sre16_test, frames])
     logger.info('Stage 1: Updating data lists..')
     save_object(join_path(data_loc, 'train_data.pkl'), train_data)
     save_object(join_path(data_loc, 'sre16_enroll.pkl'), sre16_enroll)
@@ -90,23 +101,23 @@ elif args.stage < 4 and not args.skip_check:
     _, fail3 = check_mfcc(args.save, sre16_test)
     fail = fail1 + fail2 + fail3
     if fail > 0:
-        raise Exception('No features for {:d} files. Execute Stage 1 before proceeding.'.format(fail))
+        raise Exception('No features for {:d} file(s). Execute Stage 1 before proceeding.'.format(fail))
     else:
         if train_data.shape[1] < 6:
             logger.info('Check: Fetching train_data frames counts...')
-            frames = get_mfcc_frames(args.save, train_data[:, 0])
+            frames = get_mfcc_frames(args.save, train_data[:, 0], args.num_jobs)
             logger.info('Check: Appending and saving...')
             train_data = np.hstack([train_data, frames])
             save_object(join_path(args.save, 'train_data.pkl'), train_data)
         if sre16_enroll.shape[1] < 6:
             logger.info('Check: Fetching sre16_enroll frames counts...')
-            frames = get_mfcc_frames(args.save, sre16_enroll[:, 0])
+            frames = get_mfcc_frames(args.save, sre16_enroll[:, 0], args.num_jobs)
             logger.info('Check: Appending and saving...')
             sre16_enroll = np.hstack([sre16_enroll, frames])
             save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll)
         if sre16_test.shape[1] < 8:
             logger.info('Check: Fetching sre16_test frames counts...')
-            frames = get_mfcc_frames(args.save, sre16_test[:, 0])
+            frames = get_mfcc_frames(args.save, sre16_test[:, 0], args.num_jobs)
             logger.info('Check: Appending and saving...')
             sre16_test = np.hstack([sre16_test, frames])
             save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test)
@@ -154,14 +165,14 @@ if args.stage <= 3:
     logger.start_timer('Stage 3: Neural Net Model Training...')
     batch_loader = SRESplitBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
                                        splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
-    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    model = HGRUTripletModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
     model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay)
     logger.end_timer('Stage 3:')
 
 if args.stage <= 4:
     logger.start_timer('Stage 4: Extracting embeddings...')
-    args.batch_size = args.batch_size / 2
-    model = XVectorModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    args.batch_size = args.batch_size / 4
+    model = HGRUTripletModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
     logger.info('Stage 4: Processing sre16_enroll...')
     enroll_loader = SRETestLoader(args.save, sre16_enroll, args.num_features, batch_size=args.batch_size)
     last_idx = model.extract(args.save, enroll_loader)

@@ -4,7 +4,6 @@ from os.path import join as join_path
 import numpy as np
 import re
 
-from constants.app_constants import DATA_DIR
 from services.common import get_file_list_as_dict, remove_duplicates, sort_by_index
 
 
@@ -330,6 +329,8 @@ def make_mixer6_mic(data_root, data_loc):
     mx6_loc = join_path(data_root, data_loc)
     mx6_mic_loc = join_path(mx6_loc, 'data/pcm_flac')
 
+    bad_audio = ['20091208_091618_HRM_120831']
+
     stats_key = join_path(mx6_loc, 'docs/mx6_ivcomponents.csv')
     file_list = dict()
     mic_idx = ['02', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13']  # Omitting 01, 03 and 14
@@ -350,18 +351,19 @@ def make_mixer6_mic(data_root, data_loc):
             speaker_id = re.split('[_]+', session_id)[3]
             start_time = tokens[7]
             end_time = tokens[8]
-            for idx in mic_idx:
-                file_name = '{}_CH{}'.format(session_id, idx)
-                try:
-                    file_loc = file_list[file_name]
-                    index_list.append('MX6_MIC_{}'.format(file_name))
-                    location_list.append(file_loc)
-                    channel_list.append(1)
-                    speaker_list.append('MX6_{}'.format(speaker_id))
-                    read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
-                                     .format(file_loc, start_time, float(end_time) - float(start_time)))
-                except KeyError:
-                    pass
+            if session_id not in bad_audio:
+                for idx in mic_idx:
+                    file_name = '{}_CH{}'.format(session_id, idx)
+                    try:
+                        file_loc = file_list[file_name]
+                        index_list.append('MX6_MIC_{}'.format(file_name))
+                        location_list.append(file_loc)
+                        channel_list.append(1)
+                        speaker_list.append('MX6_{}'.format(speaker_id))
+                        read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
+                                         .format(file_loc, start_time, float(end_time) - float(start_time)))
+                    except KeyError:
+                        pass
 
     print('Made {:d} files from mixer6 mic.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
