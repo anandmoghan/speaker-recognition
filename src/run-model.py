@@ -18,7 +18,7 @@ DATA_CONFIG = '../configs/sre_data.json'
 parser = ap.ArgumentParser()
 parser.add_argument('--batch-size', type=int, default=64, help='Batch Size')
 parser.add_argument('--decay', type=float, default=0.6, help='Learning Rate')
-parser.add_argument('--epochs', type=int, default=50, help='Number of Epochs')
+parser.add_argument('--epochs', type=int, default=25, help='Number of Epochs')
 parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
 parser.add_argument('--num-features', type=int, default=20, help='Batch Size')
 parser.add_argument('--num-jobs', type=int, default=20, help='Batch Size')
@@ -166,7 +166,7 @@ if args.stage <= 3:
     batch_loader = SRESplitBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
                                        splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
     model = HGRUTripletModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
-    model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay)
+    model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=False)
     logger.end_timer('Stage 3:')
 
 if args.stage <= 4:

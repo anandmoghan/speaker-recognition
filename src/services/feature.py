@@ -75,6 +75,8 @@ class MFCC:
             vad = np.fromstring(vad[idx + 4:-3], dtype=bool, sep=' ')
             remove_file(args[3])
             features = features[:, vad]
+            features = cmvn(features)
+            features = window_cmvn(features, window_len=301, var_norm=False)
             save_array(args[4], features)
         else:
             features = load_array(args[4])
@@ -107,6 +109,13 @@ def add_frames_to_args(args_list, frame_dict):
     for key in args_list[:, 0]:
         frames.append(frame_dict[key])
     return np.vstack([args_list.T, frames]).T
+
+
+def cmvn(x, var_norm=True):
+    y = x - x.mean(1, keepdims=True)
+    if var_norm:
+        y /= (x.std(1, keepdims=True) + 1e-20)
+    return y
 
 
 def generate_data_scp(save_loc, args_list, append=False):
@@ -151,3 +160,24 @@ def remove_present_from_scp(save_loc, n_jobs=10):
         for i, key in enumerate(index_list):
             f.write('{} {} |\n'.format(key, location_list[i]))
     return sum(absent)
+
+
+def window_cmvn(x, window_len=301, var_norm=True):
+    if window_len < 3 or (window_len & 1) != 1:
+        raise ValueError('Window length should be an odd integer >= 3')
+    n_dim, n_obs = x.shape
+    if n_obs < window_len:
+        return cmvn(x, var_norm)
+    h_len = int((window_len - 1) / 2)
+    y = np.zeros((n_dim, n_obs), dtype=x.dtype)
+    y[:, :h_len] = x[:, :h_len] - x[:, :window_len].mean(1, keepdims=True)
+    for ix in range(h_len, n_obs-h_len):
+        y[:, ix] = x[:, ix] - x[:, ix-h_len:ix+h_len+1].mean(1)
+    y[:, n_obs-h_len:n_obs] = x[:, n_obs-h_len:n_obs] - x[:, n_obs - window_len:].mean(1, keepdims=True)
+    if var_norm:
+        y[:, :h_len] /= (x[:, :window_len].std(1, keepdims=True) + 1e-20)
+        for ix in range(h_len, n_obs-h_len):
+            y[:, ix] /= (x[:, ix-h_len:ix+h_len+1].std(1) + 1e-20)
+        y[:, n_obs-h_len:n_obs] /= (x[:, n_obs - window_len:].std(1, keepdims=True) + 1e-20)
+    return y
+

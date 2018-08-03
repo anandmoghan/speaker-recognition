@@ -24,7 +24,7 @@ TRIPLET_MARGIN = 0.2
 MODEL_TAG = 'HGRUTRIPLET'
 
 logger = Logger()
-logger.set_config(filename='../logs/run-triplet-loss.log', append=True)
+logger.set_config(filename='../logs/run-model.log', append=True)
 
 
 class HGRUTripletModel:
@@ -34,16 +34,19 @@ class HGRUTripletModel:
         self.n_classes = n_classes
         self.lr = tf.Variable(0.0, dtype=tf.float32, trainable=False)
 
-        self.input_ = tf.transpose(self.input_, [0, 2, 1])
+        # Sequence information in not important. So, to improve performance, every HOP frames are given parallel.
+        input_ = tf.transpose(self.input_, [0, 2, 1])
+        input_ = tf.reshape(input_, [-1, HOP, n_features])
+
         with tf.variable_scope('layer_1'):
-            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_1_HIDDEN_UNITS), self.input_,
+            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_1_HIDDEN_UNITS), input_,
                                               dtype=tf.float32)
-            rnn_output = rnn_output[:, ::HOP, :]
+            rnn_output = tf.reshape(rnn_output[:, -1, :], [-1, HOP, LAYER_1_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_2'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_2_HIDDEN_UNITS), rnn_output,
                                               dtype=tf.float32)
-            rnn_output = rnn_output[:, ::HOP, :]
+            rnn_output = tf.reshape(rnn_output[:, -1, :], [batch_size, -1, LAYER_2_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_3'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_3_HIDDEN_UNITS), rnn_output,
@@ -83,7 +86,7 @@ class HGRUTripletModel:
 
         return batch_loader.get_last_idx()
 
-    def start_train(self, save_loc, batch_loader, epochs, lr, decay):
+    def start_train(self, save_loc, batch_loader, epochs, lr, decay, cont=True):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
         make_directory(model_loc)
         save_json = join_path(model_loc, LATEST_MODEL_FILE)
@@ -92,19 +95,34 @@ class HGRUTripletModel:
         saver = tf.train.Saver(tf.global_variables(), max_to_keep=10)
         with tf.Session(config=config) as sess:
             sess.run(init)
-            for s in [0, 1, 2]:
+            if cont:
+                with open(save_json, 'r') as f:
+                    model_json = json.load(f)
+                model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                                       .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
+                saver.restore(sess, model_path)
+                ne = model_json['e']
+                nb = model_json['b']
+                ns = model_json['s']
+            else:
+                ne = 0
+                nb = 0
+                ns = 0
+
+            for s in [0, 1, 2][ns:]:
                 batch_loader.set_split(s)
                 n_batches = batch_loader.total_batches()
-                for e in range(epochs):
+                for e in range(ne, epochs):
                     current_lr = lr * (decay ** e)
-                    for b in range(n_batches):
+                    for b in range(nb, n_batches):
                         batch_x, batch_y = batch_loader.next()
                         _, loss = sess.run([self.optimizer, self.loss], feed_dict={
                             self.input_: batch_x,
                             self.labels: batch_y,
                             self.lr: current_lr
                         })
-                        logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(MODEL_TAG, e + 1, b + 1, loss))
+                        logger.info('{}: Split {:d} | Epoch {:d} | Batch {:d} | Loss: {:.3f}'
+                                    .format(MODEL_TAG, s, e + 1, b + 1, loss))
                         if (e * n_batches + b + 1) % 200 == 0:
                             model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                                    .format(MODEL_TAG, e + 1, b + 1, loss))
@@ -118,5 +136,6 @@ class HGRUTripletModel:
                             saver.save(sess, model_path)
                             with open(save_json, 'w') as f:
                                 f.write(json.dumps(model_json))
-                            logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.2f}'.format(e + 1, b + 1,
+                            logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.3f}'.format(e + 1, b + 1,
                                                                                                            loss))
+                    nb = 0
