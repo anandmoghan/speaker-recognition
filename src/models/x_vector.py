@@ -34,12 +34,13 @@ logger.set_config(filename='../logs/run-triplet-loss.log', append=True)
 
 
 class XVectorModel:
-    def __init__(self, batch_size, n_features, n_classes):
-        self.input_ = tf.placeholder(tf.float32, [batch_size, n_features, None])
-        self.labels = tf.placeholder(tf.int32, [batch_size, ])
+    def __init__(self, n_features, n_classes):
+        self.input_ = tf.placeholder(tf.float32, [None, n_features, None])
+        self.labels = tf.placeholder(tf.int32, [None, ])
+        self.batch_size = tf.Variable(32, dtype=tf.int32, trainable=False)
         self.lr = tf.Variable(0.0, dtype=tf.float64, trainable=False)
 
-        input_ = tf.reshape(self.input_, [batch_size, n_features, -1, 1])
+        input_ = tf.expand_dims(self.input_, axis=3)
 
         cnn_output = tf.layers.conv2d(input_, filters=CNN_1_OUTPUT_SIZE, kernel_size=(n_features, CNN_1_CONTEXT),
                                       activation=tf.nn.relu)
@@ -62,7 +63,7 @@ class XVectorModel:
         cnn_output = tf.transpose(tf.squeeze(cnn_output), [0, 2, 1])
 
         stats_output = stats_pool(cnn_output, axes=2)
-        stats_output = tf.reshape(stats_output, [batch_size, 2 * CNN_5_OUTPUT_SIZE])
+        stats_output = tf.reshape(stats_output, [-1, 2 * CNN_5_OUTPUT_SIZE])
 
         self.x_vector = tf.layers.dense(stats_output, EMBEDDING_SIZE, activation=None)
         dense_output = tf.layers.dense(tf.nn.relu(self.x_vector), DENSE_SIZE, activation=tf.nn.relu)
@@ -90,14 +91,15 @@ class XVectorModel:
                 batch_x, args_idx = batch_loader.next()
                 print('{}: Extracting Batch {:d} embeddings...'.format(MODEL_TAG, b + 1))
                 embeddings = sess.run(self.x_vector, feed_dict={
-                    self.input_: batch_x
+                    self.input_: batch_x,
+                    self.batch_size: batch_loader.get_batch_size()
                 })
                 save_batch_array(embedding_loc, args_idx, embeddings, ext='.npy')
                 print('{}: Saved Batch {:d} embeddings at: {}'.format(MODEL_TAG, b + 1, embedding_loc))
 
         return batch_loader.get_last_idx()
 
-    def start_train(self, save_loc, batch_loader, epochs, lr, decay):
+    def start_train(self, save_loc, batch_loader, epochs, lr, decay, cont=True):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
         make_directory(model_loc)
         save_json = join_path(model_loc, LATEST_MODEL_FILE)
@@ -106,19 +108,36 @@ class XVectorModel:
         saver = tf.train.Saver(tf.global_variables(), max_to_keep=10)
         with tf.Session(config=config) as sess:
             sess.run(init)
-            for s in [0, 1, 2]:
+            if cont:
+                with open(save_json, 'r') as f:
+                    model_json = json.load(f)
+                model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                                       .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
+                saver.restore(sess, model_path)
+                ne = model_json['e']
+                nb = model_json['b']
+                ns = model_json['s']
+            else:
+                ne = 0
+                nb = 0
+                ns = 0
+
+            for s in [0, 1, 2][ns:]:
                 batch_loader.set_split(s)
+                batch_size = batch_loader.get_batch_size()
                 n_batches = batch_loader.total_batches()
-                for e in range(epochs):
+                for e in range(ne, epochs):
                     current_lr = lr * (decay ** e)
-                    for b in range(n_batches):
+                    for b in range(nb, n_batches):
                         batch_x, batch_y = batch_loader.next()
                         _, loss = sess.run([self.optimizer, self.loss], feed_dict={
                             self.input_: batch_x,
                             self.labels: batch_y,
+                            self.batch_size: batch_size,
                             self.lr: current_lr
                         })
-                        logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.2f}'.format(MODEL_TAG, e + 1, b + 1, loss))
+                        logger.info('{}: Split {:d} | Epoch {:d} | Batch {:d} | Loss: {:.3f}'
+                                    .format(MODEL_TAG, s, e + 1, b + 1, loss))
                         if (e * n_batches + b + 1) % 200 == 0:
                             model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                                    .format(MODEL_TAG, e + 1, b + 1, loss))
@@ -132,5 +151,6 @@ class XVectorModel:
                             saver.save(sess, model_path)
                             with open(save_json, 'w') as f:
                                 f.write(json.dumps(model_json))
-                            logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.2f}'.format(e + 1, b + 1,
+                            logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.3f}'.format(e + 1, b + 1,
                                                                                                            loss))
+                    nb = 0

@@ -28,10 +28,11 @@ logger.set_config(filename='../logs/run-model.log', append=True)
 
 
 class HGRUTripletModel:
-    def __init__(self, batch_size, n_features, n_classes):
-        self.input_ = tf.placeholder(tf.float32, [batch_size, n_features, None])
-        self.labels = tf.placeholder(tf.int32, [batch_size, ])
+    def __init__(self, n_features, n_classes):
+        self.input_ = tf.placeholder(tf.float32, [None, n_features, None])
+        self.labels = tf.placeholder(tf.int32, [None, ])
         self.n_classes = n_classes
+        self.batch_size = tf.Variable(32, dtype=tf.int32, trainable=False)
         self.lr = tf.Variable(0.0, dtype=tf.float32, trainable=False)
 
         # Sequence information in not important. So, to improve performance, every HOP frames are given parallel.
@@ -46,7 +47,7 @@ class HGRUTripletModel:
         with tf.variable_scope('layer_2'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_2_HIDDEN_UNITS), rnn_output,
                                               dtype=tf.float32)
-            rnn_output = tf.reshape(rnn_output[:, -1, :], [batch_size, -1, LAYER_2_HIDDEN_UNITS])
+            rnn_output = tf.reshape(rnn_output[:, -1, :], [self.batch_size, -1, LAYER_2_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_3'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_3_HIDDEN_UNITS), rnn_output,
@@ -79,7 +80,8 @@ class HGRUTripletModel:
                 batch_x, args_idx = batch_loader.next()
                 print('{}: Extracting Batch {:d} embeddings...'.format(MODEL_TAG, b + 1))
                 embeddings = sess.run(self.embeddings, feed_dict={
-                    self.input_: batch_x
+                    self.input_: batch_x,
+                    self.batch_size: batch_loader.get_batch_size()
                 })
                 save_batch_array(embedding_loc, args_idx, embeddings, ext='.npy')
                 print('{}: Saved Batch {:d} embeddings at: {}'.format(MODEL_TAG, b + 1, embedding_loc))
@@ -111,6 +113,7 @@ class HGRUTripletModel:
 
             for s in [0, 1, 2][ns:]:
                 batch_loader.set_split(s)
+                batch_size = batch_loader.get_batch_size()
                 n_batches = batch_loader.total_batches()
                 for e in range(ne, epochs):
                     current_lr = lr * (decay ** e)
@@ -119,6 +122,7 @@ class HGRUTripletModel:
                         _, loss = sess.run([self.optimizer, self.loss], feed_dict={
                             self.input_: batch_x,
                             self.labels: batch_y,
+                            self.batch_size: batch_size,
                             self.lr: current_lr
                         })
                         logger.info('{}: Split {:d} | Epoch {:d} | Batch {:d} | Loss: {:.3f}'

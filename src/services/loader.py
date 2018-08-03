@@ -64,7 +64,7 @@ class SRESplitBatchLoader:
         self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
         self.speakers = args[:, 3]
         self.n_features = n_features
-        self.batch_size = batch_size
+        self.batch_size = batch_size if type(batch_size) is list else [batch_size] * (len(splits) - 1)
         self.current_split = 0
         self.splits = splits
 
@@ -79,12 +79,13 @@ class SRESplitBatchLoader:
 
         self.batch_pointer = 0
         self.current_split_index = self.splits_index[self.current_split]
-        self.n_batches = int(len(self.current_split_index) / self.batch_size)
+        self.n_batches = int(len(self.current_split_index) / self.batch_size[self.current_split])
         self.permutation_idx = np.random.permutation(len(self.current_split_index))
-        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size], self.n_batches)
+        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size[self.current_split]],
+                                           self.n_batches)
 
     def get_batch_size(self):
-        return self.batch_size
+        return self.batch_size[self.current_split]
 
     def next(self):
         current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
@@ -95,8 +96,8 @@ class SRESplitBatchLoader:
         frame_len = self.splits[self.current_split]
         frames = self.frames[current_batch_idx]
         file_loc = self.file_loc[current_batch_idx]
-        np_features = np.zeros([self.batch_size, self.n_features, frame_len])
-        features = run_parallel(load_feature, file_loc, n_workers=6, p_bar=False)
+        np_features = np.zeros([self.batch_size[self.current_split], self.n_features, frame_len])
+        features = run_parallel(load_feature, file_loc, n_workers=10, p_bar=False)
         for i, f in enumerate(features):
             f_len = frames[i]
             if f_len > frame_len:
@@ -109,12 +110,13 @@ class SRESplitBatchLoader:
     def reset(self):
         self.batch_pointer = 0
         self.permutation_idx = np.random.permutation(len(self.current_split_index))
-        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size], self.n_batches)
+        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size[self.current_split]],
+                                           self.n_batches)
 
     def set_split(self, split):
         self.current_split = split
         self.current_split_index = self.splits_index[split]
-        self.n_batches = int(len(self.current_split_index) / self.batch_size)
+        self.n_batches = int(len(self.current_split_index) / self.batch_size[self.current_split])
         self.reset()
 
     def total_batches(self):

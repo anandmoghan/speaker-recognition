@@ -5,4 +5,4 @@ conda activate tensorflow
 
 chmod 775 -R ./kaldi
 
-python -u run-model.py --stage 3 --batch-size 128 -sc
+python -u run-model.py --stage 3 --batch-size 64 -sc

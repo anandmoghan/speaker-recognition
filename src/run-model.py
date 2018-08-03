@@ -164,15 +164,16 @@ else:
 if args.stage <= 3:
     logger.start_timer('Stage 3: Neural Net Model Training...')
     batch_loader = SRESplitBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
-                                       splits=[300, 1000, 3000, 6000], batch_size=args.batch_size)
-    model = HGRUTripletModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+                                       splits=[300, 1000, 3000, 6000],
+                                       batch_size=[args.batch_size*8, args.batch_size*4, args.batch_size])
+    model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
     model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=False)
     logger.end_timer('Stage 3:')
 
 if args.stage <= 4:
     logger.start_timer('Stage 4: Extracting embeddings...')
     args.batch_size = args.batch_size / 4
-    model = HGRUTripletModel(batch_size=args.batch_size, n_features=args.num_features, n_classes=n_speakers)
+    model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
     logger.info('Stage 4: Processing sre16_enroll...')
     enroll_loader = SRETestLoader(args.save, sre16_enroll, args.num_features, batch_size=args.batch_size)
     last_idx = model.extract(args.save, enroll_loader)
