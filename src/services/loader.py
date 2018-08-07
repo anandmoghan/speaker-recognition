@@ -209,3 +209,66 @@ class OnlineBatchLoader:
         self.batch_pointer = 0
         self.permutation_idx = np.random.permutation(self.data_len)
         self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
+
+
+class SREFixedLoader:
+    # duration and strides in frames count
+    def __init__(self, location, args, n_features, duration, stride, batch_size, n_jobs=10):
+        location = join_path(location, MFCC_DIR)
+        frames = np.array(args[:, -1], dtype=int)
+        self.n_features = n_features
+        self.batch_size = batch_size
+        self.duration = duration
+        self.stride = stride
+        self.n_jobs = n_jobs
+
+        self.file_loc = []
+        self.start = []
+        self.speakers = []
+
+        for i, key in enumerate(args[:, 0]):
+            frame = frames[i]
+            n_egs = int(frame / self.stride)
+            if (frame - (n_egs - 1) * self.stride) <= self.duration:
+                n_egs = n_egs - 1
+            file_loc = join_path(location, key + '.npy')
+            for e in range(n_egs):
+                self.file_loc.append(file_loc)
+                self.start.append(e * self.stride)
+                self.speakers.append(args[i, 3])
+
+        self.file_loc = np.array(self.file_loc)
+        self.start = np.array(self.start)
+        self.speakers = np.array(self.speakers)
+
+        self.batch_pointer = 0
+        self.n_batches = int(self.speakers.shape[0] / batch_size)
+        self.data_len = self.n_batches * batch_size
+        self.permutation_idx = np.random.permutation(len(self.speakers))[:self.data_len]
+        self.batch_splits = np.array_split(self.permutation_idx, self.n_batches)
+
+    def get_batch_size(self):
+        return self.batch_size
+
+    def next(self):
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        self.batch_pointer = self.batch_pointer + 1
+        if self.batch_pointer == self.n_batches:
+            self.reset()
+
+        file_loc = self.file_loc[current_batch_idx]
+        start_idx = self.start[current_batch_idx]
+
+        np_features = np.zeros([self.batch_size, self.n_features, self.duration])
+        features = run_parallel(load_feature, file_loc, n_workers=self.n_jobs, p_bar=False)
+        for i, f in enumerate(features):
+            np_features[i, :, :] = f[:, start_idx[i]:(start_idx[i] + self.duration)]
+        return np_features, self.speakers[current_batch_idx]
+
+    def reset(self):
+        self.batch_pointer = 0
+        self.permutation_idx = np.random.permutation(self.speakers.shape[0])[:self.data_len]
+        self.batch_splits = np.array_split(self.permutation_idx, self.n_batches)
+
+    def total_batches(self):
+        return self.n_batches

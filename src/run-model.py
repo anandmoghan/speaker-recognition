@@ -9,19 +9,19 @@ from models.hierarchical import HGRUTripletModel
 from services.checks import check_embeddings, check_mfcc
 from services.common import create_directories, load_object, save_object
 from services.feature import MFCC, VAD, generate_data_scp, get_mfcc_frames, remove_present_from_scp
-from services.loader import SRETestLoader, SRESplitBatchLoader
+from services.loader import SREFixedLoader, SRETestLoader
 from services.logger import Logger
 from services.sre_data import get_train_data, make_sre16_eval_data
 
 DATA_CONFIG = '../configs/sre_data.json'
 
 parser = ap.ArgumentParser()
-parser.add_argument('--batch-size', type=int, default=64, help='Batch Size')
-parser.add_argument('--decay', type=float, default=0.6, help='Learning Rate')
-parser.add_argument('--epochs', type=int, default=25, help='Number of Epochs')
-parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
-parser.add_argument('--num-features', type=int, default=20, help='Batch Size')
-parser.add_argument('--num-jobs', type=int, default=20, help='Batch Size')
+parser.add_argument('--batch-size', type=int, default=1920, help='Batch Size')
+parser.add_argument('--decay', type=float, default=0.1, help='Decay Rate')
+parser.add_argument('--epochs', type=int, default=5, help='Number of Epochs')
+parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
+parser.add_argument('--num-features', type=int, default=20, help='Number of MFCC Co-efficients')
+parser.add_argument('--num-jobs', type=int, default=20, help='Number of parallel jobs')
 parser.add_argument('--sample-rate', type=int, default=8000, help='Sampling Rate')
 parser.add_argument('--save', default='../save', help='Save Location')
 parser.add_argument('-sc', '--skip-check', action="store_true", default=False, help='Skip Check')
@@ -162,16 +162,17 @@ else:
     logger.end_timer('Load:')
 
 if args.stage <= 3:
-    logger.start_timer('Stage 3: Neural Net Model Training...')
-    batch_loader = SRESplitBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
-                                       splits=[300, 1000, 3000, 6000],
-                                       batch_size=[args.batch_size*8, args.batch_size*4, args.batch_size])
+    logger.start_timer('Stage 3: Train Neural Net.')
+    logger.info('Initializing batch loader...')
+    batch_loader = SREFixedLoader(location=args.save, args=train_data, n_features=args.num_features,
+                                  batch_size=args.batch_size, duration=300, stride=200, n_jobs=args.num_jobs)
     model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
+    logger.info('Training model...')
     model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=False)
     logger.end_timer('Stage 3:')
 
 if args.stage <= 4:
-    logger.start_timer('Stage 4: Extracting embeddings...')
+    logger.start_timer('Stage 4: Embedding Extraction.')
     args.batch_size = args.batch_size / 4
     model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
     logger.info('Stage 4: Processing sre16_enroll...')

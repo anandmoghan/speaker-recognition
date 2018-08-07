@@ -105,6 +105,57 @@ class HGRUTripletModel:
                 saver.restore(sess, model_path)
                 ne = model_json['e']
                 nb = model_json['b']
+            else:
+                ne = 0
+                nb = 0
+
+            batch_size = batch_loader.get_batch_size()
+            n_batches = batch_loader.total_batches()
+            for e in range(ne, epochs):
+                current_lr = lr * (decay ** e)
+                for b in range(nb, n_batches):
+                    batch_x, batch_y = batch_loader.next()
+                    _, loss = sess.run([self.optimizer, self.loss], feed_dict={
+                        self.input_: batch_x,
+                        self.labels: batch_y,
+                        self.batch_size: batch_size,
+                        self.lr: current_lr
+                    })
+                    logger.info('{}: Epoch {:d} | Batch {:d} | Loss: {:.3f}'
+                                .format(MODEL_TAG, e + 1, b + 1, loss))
+                    if (e * n_batches + b + 1) % 200 == 0:
+                        model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                                               .format(MODEL_TAG, e + 1, b + 1, loss))
+                        model_json = {
+                            'e': e,
+                            'b': b,
+                            'lr': float(current_lr),
+                            'loss': float(loss)
+                        }
+                        saver.save(sess, model_path)
+                        with open(save_json, 'w') as f:
+                            f.write(json.dumps(model_json))
+                        logger.info('Model Saved at Epoch: {:d}, Batch: {:d} with Loss: {:.3f}'.format(e + 1, b + 1,
+                                                                                                       loss))
+                nb = 0
+
+    def start_train_with_splits(self, save_loc, batch_loader, epochs, lr, decay, cont=True):
+        model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
+        make_directory(model_loc)
+        save_json = join_path(model_loc, LATEST_MODEL_FILE)
+
+        init = tf.global_variables_initializer()
+        saver = tf.train.Saver(tf.global_variables(), max_to_keep=10)
+        with tf.Session(config=config) as sess:
+            sess.run(init)
+            if cont:
+                with open(save_json, 'r') as f:
+                    model_json = json.load(f)
+                model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                                       .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
+                saver.restore(sess, model_path)
+                ne = model_json['e']
+                nb = model_json['b']
                 ns = model_json['s']
             else:
                 ne = 0
