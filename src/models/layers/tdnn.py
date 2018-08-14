@@ -12,13 +12,24 @@ def get_gather_idx(context, batch_size, n_frames):
     return np.array(gather_idx)
 
 
-def tdnn_2d(input_, gather_idx, context, n_features, batch_size, output_size):
-    n_features = len(context) * n_features
-    input_ = tf.transpose(input_, [0, 2, 1])
-    input_ = tf.gather_nd(input_, gather_idx)
-    input_ = tf.transpose(input_, [0, 2, 1])
-    input_ = tf.reshape(input_, [batch_size, n_features, -1])
-    input_ = tf.expand_dims(input_, 3)
-    output_ = tf.layers.conv2d(input_, filters=output_size, kernel_size=(n_features, 1))
-    output_ = tf.transpose(tf.squeeze(output_), [0, 2, 1])
-    return output_
+def tdnn2d(name, input_, context, out_channels, activation=None):
+    context = np.array(context)
+    context = context if min(context) >= 0 else context - np.array([min(context)] * len(context))
+    kernel_height = input_.shape[1]
+    kernel_width = max(context) + 1
+    in_channels = input_.shape[3]
+    mask = [1 if idx in context else 0 for idx in range(kernel_width)]
+
+    with tf.variable_scope(name) as scope:
+        kernel = tf.get_variable('{}_weights'.format(name),
+                                 shape=[kernel_height, out_channels, in_channels, kernel_width],
+                                 dtype=tf.float32, initializer=tf.initializers.random_normal())
+        bias = tf.get_variable('{}_bias'.format(name), shape=[out_channels], dtype=tf.float32,
+                               initializer=tf.initializers.random_normal())
+        kernel = tf.multiply(kernel, tf.cast(tf.constant(mask), dtype=kernel.dtype))
+        kernel = tf.transpose(kernel, [0, 3, 2, 1])
+        output_ = tf.nn.convolution(input_, kernel, strides=[1, 1], padding="VALID", name=scope.name) + bias
+
+    if activation is not None:
+        output_ = activation(output_)
+    return tf.transpose(output_, [0, 3, 2, 1])

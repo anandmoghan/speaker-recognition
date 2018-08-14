@@ -6,7 +6,6 @@ import json
 from constants.app_constants import EMB_DIR, LATEST_MODEL_FILE, MODELS_DIR
 from models.layers.attention import variable_attention
 from models.layers.stats_pooling import stats_pool
-from models.layers.tdnn import tdnn2d
 from services.common import make_directory, save_batch_array, tensorflow_debug, use_gpu
 from services.logger import Logger
 
@@ -16,11 +15,16 @@ use_gpu(0)
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
-TDNN_1_OUTPUT_SIZE = 512
-TDNN_2_OUTPUT_SIZE = 512
-TDNN_3_OUTPUT_SIZE = 512
-TDNN_4_OUTPUT_SIZE = 512
-TDNN_5_OUTPUT_SIZE = 1500
+CNN_1_OUTPUT_SIZE = 512
+CNN_1_CONTEXT = 5
+CNN_2_OUTPUT_SIZE = 512
+CNN_2_CONTEXT = 5
+CNN_3_OUTPUT_SIZE = 512
+CNN_3_CONTEXT = 5
+CNN_4_OUTPUT_SIZE = 512
+CNN_4_CONTEXT = 1
+CNN_5_OUTPUT_SIZE = 1500
+CNN_5_CONTEXT = 1
 ATTENTION_SIZE = 512
 EMBEDDING_SIZE = 512
 DENSE_SIZE = 512
@@ -31,7 +35,7 @@ logger = Logger()
 logger.set_config(filename='../logs/run-triplet-loss.log', append=True)
 
 
-class XVectorModel:
+class XVectorCNNModel:
     def __init__(self, n_features, n_classes, attention=False):
         self.input_ = tf.placeholder(tf.float32, [None, n_features, None])
         self.labels = tf.placeholder(tf.int32, [None, ])
@@ -40,24 +44,32 @@ class XVectorModel:
 
         input_ = tf.expand_dims(self.input_, axis=3)
 
-        tdnn_output = tdnn2d('tdnn1', input_, [-2, -1, 0, 1, 2], TDNN_1_OUTPUT_SIZE, activation=tf.nn.relu)
+        cnn_output = tf.layers.conv2d(input_, filters=CNN_1_OUTPUT_SIZE, kernel_size=(n_features, CNN_1_CONTEXT),
+                                      activation=tf.nn.relu)
+        cnn_output = tf.transpose(cnn_output, [0, 3, 2, 1])
 
-        tdnn_output = tdnn2d('tdnn2', tdnn_output, [-2, -1, 0, 1, 2], TDNN_2_OUTPUT_SIZE, activation=tf.nn.relu)
+        cnn_output = tf.layers.conv2d(cnn_output, filters=CNN_2_OUTPUT_SIZE,
+                                      kernel_size=(CNN_1_OUTPUT_SIZE, CNN_2_CONTEXT), activation=tf.nn.relu)
+        cnn_output = tf.transpose(cnn_output, [0, 3, 2, 1])
 
-        tdnn_output = tdnn2d('tdnn3', tdnn_output, [-2, 0, 2], TDNN_3_OUTPUT_SIZE, activation=tf.nn.relu)
+        cnn_output = tf.layers.conv2d(cnn_output, filters=CNN_3_OUTPUT_SIZE,
+                                      kernel_size=(CNN_2_OUTPUT_SIZE, CNN_3_CONTEXT), activation=tf.nn.relu)
+        cnn_output = tf.transpose(cnn_output, [0, 3, 2, 1])
 
-        tdnn_output = tdnn2d('tdnn4', tdnn_output, [0], TDNN_4_OUTPUT_SIZE, activation=tf.nn.relu)
+        cnn_output = tf.layers.conv2d(cnn_output, filters=CNN_4_OUTPUT_SIZE,
+                                      kernel_size=(CNN_3_OUTPUT_SIZE, CNN_4_CONTEXT), activation=tf.nn.relu)
+        cnn_output = tf.transpose(cnn_output, [0, 3, 2, 1])
 
-        tdnn_output = tdnn2d('tdnn4', tdnn_output, [0], TDNN_5_OUTPUT_SIZE, activation=tf.nn.relu)
-
-        tdnn_output = tf.squeeze(tdnn_output)
+        cnn_output = tf.layers.conv2d(cnn_output, filters=CNN_5_OUTPUT_SIZE,
+                                      kernel_size=(CNN_4_OUTPUT_SIZE, CNN_5_CONTEXT), activation=tf.nn.relu)
+        cnn_output = tf.transpose(tf.squeeze(cnn_output), [0, 2, 1])
 
         if attention:
-            stats_output = variable_attention(tdnn_output, size=ATTENTION_SIZE)
-            stats_output = tf.reshape(stats_output, [-1, TDNN_5_OUTPUT_SIZE])
+            stats_output = variable_attention(cnn_output, size=ATTENTION_SIZE)
+            stats_output = tf.reshape(stats_output, [-1, CNN_5_OUTPUT_SIZE])
         else:
-            stats_output = stats_pool(tdnn_output, axes=2)
-            stats_output = tf.reshape(stats_output, [-1, 2 * TDNN_5_OUTPUT_SIZE])
+            stats_output = stats_pool(cnn_output, axes=2)
+            stats_output = tf.reshape(stats_output, [-1, 2 * CNN_5_OUTPUT_SIZE])
 
         self.x_vector = tf.layers.dense(stats_output, EMBEDDING_SIZE, activation=None)
         dense_output = tf.layers.dense(tf.nn.relu(self.x_vector), DENSE_SIZE, activation=tf.nn.relu)

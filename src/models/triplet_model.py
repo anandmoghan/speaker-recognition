@@ -80,7 +80,7 @@ class TripletModel:
         model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
                                .format(MODEL_TAG, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
 
-        embedding_loc = join_path(join_path(save_loc, EMB_DIR), MODEL_TAG)
+        embedding_loc = join_path(save_loc, EMB_DIR)
         make_directory(embedding_loc)
 
         saver = tf.train.Saver()
@@ -96,8 +96,6 @@ class TripletModel:
                 })
                 save_batch_array(embedding_loc, args_idx, embeddings, ext='.npy')
                 print('{}: Saved Batch {:d} embeddings at: {}'.format(MODEL_TAG, b + 1, embedding_loc))
-
-        return batch_loader.get_last_idx()
 
     def start_train(self, save_loc, batch_loader, epochs, lr, decay, cont=True):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), MODEL_TAG)
