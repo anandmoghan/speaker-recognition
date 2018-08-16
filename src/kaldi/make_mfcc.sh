@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 cd $PWD/kaldi
-source ./path.sh
 
 cmd=queue.pl
 nj=4

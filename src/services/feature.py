@@ -5,8 +5,8 @@ from os.path import exists, join as join_path
 import numpy as np
 
 from constants.app_constants import DATA_SCP_FILE, MFCC_DIR, VAD_DIR
-from services.common import run_command, run_parallel, load_array, save_array
-from services.kaldi import scp_to_dict
+from services.common import load_array, run_parallel, save_array
+from services.kaldi import read_feat, read_vector, scp_to_dict, Kaldi
 
 
 class MFCC:
@@ -59,20 +59,18 @@ class MFCC:
         return frame_dict
 
     def extract(self, data_scp):
-        return run_command('sh ./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
+        return Kaldi().run_command('sh ./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
 
     def run_vad_and_save(self, args):
         if not exists(args[4]):
-            idx = len(args[0])
             with open(args[3], 'w') as f:
                 f.write('{} {}'.format(args[0], args[1]))
-            features, _ = run_command('source ./kaldi/path.sh && copy-feats scp:{} ark,t:'.format(args[3]))
-            features = np.fromstring(features[idx + 6:-3], dtype=float, sep=' \n').reshape([-1, self.n_ceps]).T
+            features = read_feat(args[3], self.n_ceps)
 
             with open(args[3], 'w') as f:
                 f.write('{} {}'.format(args[0], args[2]))
-            vad, _ = run_command('source ./kaldi/path.sh && copy-vector scp:{} ark,t:'.format(args[3]))
-            vad = np.fromstring(vad[idx + 4:-3], dtype=bool, sep=' ')
+            vad = read_vector(args[3])
+
             remove_file(args[3])
             features = features[:, vad]
             features = cmvn(features)
@@ -101,7 +99,7 @@ class VAD:
         self.params_file = params_file
 
     def compute(self, feats_scp):
-        return run_command('sh ./kaldi/compute_vad.sh {} {}'.format(feats_scp, self.params_file))
+        return Kaldi().run_command('sh ./kaldi/compute_vad.sh {} {}'.format(feats_scp, self.params_file))
 
 
 def add_frames_to_args(args_list, frame_dict):
@@ -180,4 +178,3 @@ def window_cmvn(x, window_len=301, var_norm=True):
             y[:, ix] /= (x[:, ix-h_len:ix+h_len+1].std(1) + 1e-20)
         y[:, n_obs-h_len:n_obs] /= (x[:, n_obs - window_len:].std(1, keepdims=True) + 1e-20)
     return y
-
