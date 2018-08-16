@@ -134,17 +134,15 @@ class SRETestLoader:
         self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
         self.n_features = n_features
         self.batch_size = batch_size
+        self.multiple = 1
 
         self.batch_pointer = 0
-        self.n_batches = int(self.frames.shape[0] / batch_size)
-        data_len = self.n_batches * batch_size
+        data_len = self.frames.shape[0]
+        self.n_batches = int(data_len / batch_size)
         self.batch_splits = np.array_split(np.linspace(0, data_len - 1, data_len, dtype=int), self.n_batches)
 
     def get_batch_size(self):
         return self.batch_size
-
-    def get_last_idx(self):
-        return self.n_batches * self.batch_size
 
     def next(self):
         if self.batch_pointer == self.n_batches:
@@ -153,8 +151,9 @@ class SRETestLoader:
         current_batch_idx = self.batch_splits[self.batch_pointer]
         self.batch_pointer = self.batch_pointer + 1
 
+        self.batch_size = len(current_batch_idx)
         frames = self.frames[current_batch_idx]
-        frame_len = frames[0]
+        frame_len = int(frames[0] / self.multiple) * self.multiple
         file_loc = self.file_loc[current_batch_idx]
         np_features = np.zeros([self.batch_size, self.n_features, frame_len])
         features = run_parallel(load_feature, file_loc, n_workers=6, p_bar=False)
@@ -166,6 +165,9 @@ class SRETestLoader:
                 idx = 0
             np_features[i, :, :] = f[:, idx:(idx + frame_len)]
         return np_features, self.args_idx[current_batch_idx]
+
+    def set_multiple(self, value):
+        self.multiple = value
 
     def total_batches(self):
         return self.n_batches

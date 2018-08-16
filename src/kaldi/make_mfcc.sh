@@ -19,7 +19,7 @@ data_scp=$1
 
 log_loc="$mfcc_loc/log"
 mkdir -p ${mfcc_loc} || exit 1;
-mkdir -p ${log_loc}|| exit 1;
+mkdir -p ${log_loc} || exit 1;
 
 if [ -f ${mfcc_loc}/feats.scp ]; then
   mkdir -p ${mfcc_loc}/.backup

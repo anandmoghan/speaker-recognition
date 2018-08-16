@@ -6,7 +6,7 @@ import numpy as np
 
 from constants.app_constants import DATA_SCP_FILE, MFCC_DIR, VAD_DIR
 from services.common import load_array, run_parallel, save_array
-from services.kaldi import read_feat, read_vector, scp_to_dict, Kaldi
+from services.kaldi import read_feat, read_vectors, scp_to_dict, Kaldi
 
 
 class MFCC:
@@ -69,7 +69,7 @@ class MFCC:
 
             with open(args[3], 'w') as f:
                 f.write('{} {}'.format(args[0], args[2]))
-            vad = read_vector(args[3])
+            _, vad = read_vectors(args[3])
 
             remove_file(args[3])
             features = features[:, vad]

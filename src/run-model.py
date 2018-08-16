@@ -4,21 +4,23 @@ from os.path import join as join_path, abspath
 import argparse as ap
 import numpy as np
 
-from constants.app_constants import DATA_DIR, DATA_SCP_FILE, FEATS_SCP_FILE, VAD_SCP_FILE
+from constants.app_constants import DATA_DIR, DATA_SCP_FILE, FEATS_SCP_FILE, VAD_SCP_FILE, EMB_DIR
 from models.hierarchical import HGRUTripletModel
 from services.checks import check_embeddings, check_mfcc
 from services.common import create_directories, load_object, save_object
 from services.feature import MFCC, VAD, generate_data_scp, get_mfcc_frames, remove_present_from_scp
-from services.loader import SREFixedLoader, SRETestLoader
+from services.kaldi import PLDA
+from services.loader import SRETestLoader, SRESplitBatchLoader
 from services.logger import Logger
 from services.sre_data import get_train_data, make_sre16_eval_data
 
 DATA_CONFIG = '../configs/sre_data.json'
 
 parser = ap.ArgumentParser()
-parser.add_argument('--batch-size', type=int, default=1920, help='Batch Size')
+parser.add_argument('--batch-size', type=int, default=64, help='Training Batch Size')
 parser.add_argument('--decay', type=float, default=0.1, help='Decay Rate')
 parser.add_argument('--epochs', type=int, default=5, help='Number of Epochs')
+parser.add_argument('--extract-batch-size', type=int, default=32, help='Extract Batch Size')
 parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
 parser.add_argument('--num-features', type=int, default=20, help='Number of MFCC Co-efficients')
 parser.add_argument('--num-jobs', type=int, default=20, help='Number of parallel jobs')
@@ -53,6 +55,7 @@ else:
     sre16_enroll = load_object(join_path(data_loc, 'sre16_enroll.pkl'))
     sre16_test = load_object(join_path(data_loc, 'sre16_test.pkl'))
     logger.end_timer('Load:')
+
 
 if args.stage <= 1:
     logger.start_timer('Stage 1: Feature Extraction.')
@@ -123,6 +126,7 @@ elif args.stage < 4 and not args.skip_check:
             save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test)
     logger.end_timer('Check:')
 
+
 if args.stage <= 2:
     logger.start_timer('Stage 2: Pre-processing...')
     logger.info('Stage 2: Filtering out short duration utterances and sorting by duration...')
@@ -161,27 +165,32 @@ else:
     train_data[:, 3] = np.array([speaker_to_idx[s] for s in speakers])
     logger.end_timer('Load:')
 
-if args.stage <= 3:
-    logger.start_timer('Stage 3: Train Neural Net.')
-    logger.info('Initializing batch loader...')
-    batch_loader = SREFixedLoader(location=args.save, args=train_data, n_features=args.num_features,
-                                  batch_size=args.batch_size, duration=300, stride=200, n_jobs=args.num_jobs)
-    model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
-    logger.info('Training model...')
-    model.start_train(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=False)
-    logger.end_timer('Stage 3:')
 
 if args.stage <= 4:
+    model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers, attention=False)
+    if args.stage <= 3:
+        logger.start_timer('Stage 3: Train Neural Net.')
+        logger.info('Stage 3: Initializing batch loader...')
+        # batch_loader = SREFixedLoader(location=args.save, args=train_data, n_features=args.num_features,
+        #                               batch_size=args.batch_size, duration=300, stride=200, n_jobs=args.num_jobs)
+        batch_loader = SRESplitBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
+                                           splits=[300, 1000, 3000, 6000],
+                                           batch_size=[args.batch_size * 10, args.batch_size * 3, args.batch_size])
+        logger.info('Stage 3: Training model...')
+        model.start_train_with_splits(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=False)
+        logger.end_timer('Stage 3:')
+
     logger.start_timer('Stage 4: Embedding Extraction.')
-    args.batch_size = args.batch_size / 4
-    model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers)
+    logger.info('Stage 4: Processing train_data...')
+    train_loader = SRETestLoader(args.save, train_data, args.num_features, batch_size=args.extract_batch_size)
+    model.extract(args.save, train_loader)
     logger.info('Stage 4: Processing sre16_enroll...')
-    enroll_loader = SRETestLoader(args.save, sre16_enroll, args.num_features, batch_size=args.batch_size)
-    last_idx = model.extract(args.save, enroll_loader)
+    enroll_loader = SRETestLoader(args.save, sre16_enroll, args.num_features, batch_size=args.extract_batch_size)
+    model.extract(args.save, enroll_loader)
     save_object(join_path(args.save, 'sre16_enroll.pkl'), sre16_enroll[:last_idx, :])
     logger.info('Stage 4: Processing sre16_test...')
-    test_loader = SRETestLoader(args.save, sre16_test, args.num_features, batch_size=args.batch_size)
-    last_idx = model.extract(args.save, test_loader)
+    test_loader = SRETestLoader(args.save, sre16_test, args.num_features, batch_size=args.extract_batch_size)
+    model.extract(args.save, test_loader)
     save_object(join_path(args.save, 'sre16_test.pkl'), sre16_test[:last_idx, :])
     logger.end_timer('Stage 4:')
 elif not args.skip_check:
@@ -193,7 +202,10 @@ elif not args.skip_check:
 
 if args.stage <= 5:
     logger.start_timer('Stage 5: PLDA Training...')
+    plda = PLDA(save_loc=args.save)
+    plda.fit(train_data[:, 0], train_data[:, 3])
     logger.end_timer('Stage 5:')
+
 
 if args.stage <= 6:
     logger.start_timer('Stage 6: PLDA Scoring...')

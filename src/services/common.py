@@ -10,7 +10,7 @@ import os
 import pickle
 import time
 
-from constants.app_constants import DATA_DIR, EMB_DIR, MFCC_DIR, MODELS_DIR, VAD_DIR
+from constants.app_constants import DATA_DIR, EMB_DIR, MFCC_DIR, MODELS_DIR, PLDA_DIR, VAD_DIR
 
 
 def create_directories(save_loc):
@@ -19,6 +19,7 @@ def create_directories(save_loc):
     make_directory(join_path(save_loc, VAD_DIR))
     make_directory(join_path(save_loc, MFCC_DIR))
     make_directory(join_path(save_loc, MODELS_DIR))
+    make_directory(join_path(save_loc, PLDA_DIR))
     make_directory(join_path(save_loc, EMB_DIR))
 
 
