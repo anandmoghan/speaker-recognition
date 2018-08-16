@@ -144,19 +144,17 @@ def remove_present_from_scp(save_loc, n_jobs=10):
     mfcc_loc = join_path(save_loc, MFCC_DIR)
     file_list = []
     index_list = []
-    location_list = []
+    scp_list = []
     with open(data_scp_file, 'r') as f:
         for line in f.readlines():
             tokens = re.split('[\s]+', line.strip())
             file_list.append('{}/{}.npy'.format(mfcc_loc, tokens[0]))
             index_list.append(tokens[0])
-            location_list.append(tokens[1])
+            scp_list.append(line)
     absent = np.invert(run_parallel(exists, file_list, n_jobs, p_bar=False), dtype=bool)
-    index_list = np.array(index_list)[absent]
-    location_list = np.array(location_list)[absent]
+    scp_list = np.array(scp_list)[absent]
     with open(data_scp_file, 'w') as f:
-        for i, key in enumerate(index_list):
-            f.write('{} {} |\n'.format(key, location_list[i]))
+        f.writelines(scp_list)
     return sum(absent)
 
 
