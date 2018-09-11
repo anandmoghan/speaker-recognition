@@ -251,10 +251,18 @@ def make_swbd_phase(data_root, data_loc, phase=1):
     print('Making swbd phase {} lists...'.format(phase))
     swbd_loc = join_path(data_root, data_loc)
 
+    bad_audio = ['sw_22602']
+
     stats_key = join_path(swbd_loc, 'docs/callinfo.tbl')
     swbd_type = 'swbd_p{:d}_'.format(phase)
 
     file_list = get_file_list_as_dict(swbd_loc)
+
+    for ba in bad_audio:
+        try:
+            del file_list[ba]
+        except KeyError:
+            pass
 
     index_list = []
     location_list = []
@@ -441,7 +449,7 @@ def make_sre16_eval_data(sre_config):
                 file_loc = file_list[file_name]
                 index_list.append('sre16_eval_test_' + file_name)
                 location_list.append(file_loc)
-                speaker_list.append('sre16_eval_test_' + speaker_id)
+                speaker_list.append('sre16_eval_enroll_' + speaker_id)
                 channel_list.append(1)
                 read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
                 language_list.append(call_to_language[call_id])
@@ -455,3 +463,69 @@ def make_sre16_eval_data(sre_config):
                            language_list]).T
 
     return enrollment_data, test_data
+
+
+def make_sre16_unlabelled_data(sre_config):
+    print('Making sre2016 unlabelled lists...')
+    with open(sre_config, 'r') as f:
+        sre_data = load_json(f.read())
+    data_root = sre_data['ROOT']
+    data_loc = sre_data['LOCATION']['SRE16_UNLABELED']
+    sre_loc = join_path(data_root, data_loc)
+
+    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/unlabeled/major'))
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    for key in file_list.keys():
+        index_list.append(key)
+        location_list.append(file_list[key])
+        speaker_list.append('sre16_unlabelled_{}'.format(key))
+        channel_list.append(1)
+        read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_list[key]))
+
+    return np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+
+
+def make_sre16_trials_file(sre_config, trials_file):
+    with open(sre_config, 'r') as f:
+        sre_data = load_json(f.read())
+    data_root = sre_data['ROOT']
+    data_loc = sre_data['LOCATION']['SRE16_EVAL']
+    sre_loc = join_path(data_root, data_loc)
+
+    segment_key = join_path(sre_loc, 'docs/sre16_eval_segment_key.tsv')
+    language_key = join_path(sre_loc, 'metadata/calls.tsv')
+    trial_key = join_path(sre_loc, 'docs/sre16_eval_trial_key.tsv')
+
+    utt_to_call = dict()
+    with open(segment_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            utt_to_call[tokens[0]] = tokens[1]
+
+    call_to_language = dict()
+    with open(language_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            call_to_language[tokens[0]] = tokens[1]
+
+    trials_list = []
+    with open(trial_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            speaker_id = tokens[0]
+            file_name = tokens[1]
+            target_type = tokens[3]
+            trials_list.append('sre16_eval_enroll_{} sre16_eval_test_{} {}'.format(speaker_id, file_name, target_type))
+
+    with open(trials_file, 'w') as f:
+        for trial in trials_list:
+            f.write('{}\n'.format(trial))
+
+    # with open(trials_file, 'w') as f:
+    #     for (i, s, t) in zip(index_list, speaker_list, target_list):
+    #         f.write('{} {} {}\n'.format(s, i, t))

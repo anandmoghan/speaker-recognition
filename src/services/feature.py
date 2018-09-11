@@ -1,12 +1,12 @@
 import re
-from os import remove as remove_file
 from os.path import exists, join as join_path
 
 import numpy as np
 
-from constants.app_constants import DATA_SCP_FILE, MFCC_DIR, VAD_DIR
-from services.common import load_array, run_parallel, save_array
-from services.kaldi import read_feat, read_vectors, scp_to_dict, Kaldi
+from constants.app_constants import DATA_SCP_FILE, MFCC_DIR, VAD_DIR, FEATS_SCP_FILE, UTT2NUM_FRAMES_FILE, TMP_DIR, \
+    VAD_SCP_FILE
+from services.common import load_array, run_parallel, run_command
+from services.kaldi import Kaldi, spaced_file_to_dict
 
 
 class MFCC:
@@ -30,55 +30,57 @@ class MFCC:
             f.write('--snip-edges={}\n'.format('false'))
 
         self.mfcc_loc = mfcc_loc
+        self.save_loc = save_loc
         self.params_file = params_file
         self.n_ceps = n_ceps
         self.n_jobs = n_jobs
 
-    def apply_vad_and_save(self, feats_scp, vad_scp):
-        feats_dict = scp_to_dict(feats_scp)
-        vad_dict = scp_to_dict(vad_scp)
-        index_list = []
-        feature_list = []
-        vad_list = []
-        save_list = []
-        scp_list = []
-        for key in feats_dict.keys():
-            try:
-                vad_list.append(vad_dict[key])
-                index_list.append(key)
-                feature_list.append(feats_dict[key])
-                scp_list.append('{}/{}.scp'.format(self.mfcc_loc, key))
-                save_list.append('{}/{}.npy'.format(self.mfcc_loc, key))
-            except KeyError:
-                pass
-        args_list = np.vstack([index_list, feature_list, vad_list, scp_list, save_list]).T
-        frames = run_parallel(self.run_vad_and_save, args_list, self.n_jobs, p_bar=False)
-        frame_dict = dict()
-        for i, key in enumerate(args_list[:, 0]):
-            frame_dict[key] = frames[i]
-        return frame_dict
-
     def extract(self, data_scp):
         return Kaldi().run_command('sh ./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
 
-    def run_vad_and_save(self, args):
-        if not exists(args[4]):
-            with open(args[3], 'w') as f:
-                f.write('{} {}'.format(args[0], args[1]))
-            features = read_feat(args[3], self.n_ceps)
+    def extract_with_vad_and_normalization(self, data_scp, threshold=5.5, mean_scale=0.5, cmvn_window=300, var_norm=False):
+        vad_loc = join_path(self.save_loc, VAD_DIR)
+        tmp_loc = join_path(self.save_loc, TMP_DIR)
 
-            with open(args[3], 'w') as f:
-                f.write('{} {}'.format(args[0], args[2]))
-            _, vad = read_vectors(args[3])
+        feats_scp = join_path(self.save_loc, FEATS_SCP_FILE)
+        vad_scp = join_path(self.save_loc, VAD_SCP_FILE)
 
-            remove_file(args[3])
-            features = features[:, vad]
-            features = cmvn(features)
-            features = window_cmvn(features, window_len=301, var_norm=False)
-            save_array(args[4], features)
-        else:
-            features = load_array(args[4])
-        return features.shape[1]
+        print('MFCC: Extracting features...')
+        self.extract(data_scp)
+
+        print('MFCC: Computing VAD...')
+        vad = VAD(threshold, mean_scale, n_jobs=self.n_jobs, save_loc=self.save_loc)
+        vad.compute(feats_scp)
+
+        print('MFCC: Normalizing features and selecting voiced frames..')
+        feats_scp_dict = spaced_file_to_dict(feats_scp)
+        vad_scp_dict = spaced_file_to_dict(vad_scp)
+
+        splits = np.array_split(list(feats_scp_dict.keys()), self.n_jobs)
+        for i in range(self.n_jobs):
+            split_feat_scp = open(join_path(tmp_loc, 'feats.{}.scp'.format(i + 1)), 'w')
+            split_vad_scp = open(join_path(tmp_loc, 'vad.{}.scp'.format(i + 1)), 'w')
+            for key in splits[i]:
+                split_feat_scp.write('{} {}\n'.format(key, feats_scp_dict[key]))
+                split_vad_scp.write('{} {}\n'.format(key, vad_scp_dict[key]))
+            split_feat_scp.close()
+            split_vad_scp.close()
+
+        Kaldi().queue('JOB=1:{nj} {mfcc_loc}/log/voiced_feats.JOB.log '
+                      'apply-cmvn-sliding --norm-vars={var_norm} --center=true --cmn-window={window} scp:{tmp_loc}/feats.JOB.scp ark:- \| '
+                      'select-voiced-frames ark:- scp,ns,cs:{tmp_loc}/vad.JOB.scp ark:- \| '
+                      'copy-feats --compress=false --write-num-frames=ark,t:{mfcc_loc}/log/utt2num_frames.JOB ark:- '
+                      'ark,scp:{mfcc_loc}/voiced_feats.JOB.ark,{mfcc_loc}/voiced_feats.JOB.scp || exit 1;'
+                      .format(mfcc_loc=self.mfcc_loc, tmp_loc=tmp_loc, vad_loc=vad_loc, var_norm='true' if var_norm else 'false',
+                              nj=self.n_jobs, window=cmvn_window))
+
+        run_command('for n in $(seq {nj}); do \n'
+                    '   cat {mfcc_loc}/voiced_feats.$n.scp || exit 1;\n'
+                    'done > {mfcc_loc}/feats.scp || exit 1'.format(mfcc_loc=self.mfcc_loc, nj=self.n_jobs))
+
+        run_command('for n in $(seq {nj}); do \n'
+                    '   cat {mfcc_loc}/log/utt2num_frames.$n || exit 1;\n'
+                    'done > {mfcc_loc}/utt2num_frames || exit 1'.format(mfcc_loc=self.mfcc_loc, nj=self.n_jobs))
 
 
 class VAD:
@@ -109,13 +111,6 @@ def add_frames_to_args(args_list, frame_dict):
     return np.vstack([args_list.T, frames]).T
 
 
-def cmvn(x, var_norm=True):
-    y = x - x.mean(1, keepdims=True)
-    if var_norm:
-        y /= (x.std(1, keepdims=True) + 1e-20)
-    return y
-
-
 def generate_data_scp(save_loc, args_list, append=False):
     data_scp_file = join_path(save_loc, DATA_SCP_FILE)
     with open(data_scp_file, 'a' if append else 'w') as f:
@@ -127,16 +122,36 @@ def get_frame(file_loc):
     return load_array(file_loc).shape[1]
 
 
-def get_mfcc_frames(save_loc, args, n_jobs=10):
-    mfcc_loc = join_path(save_loc, MFCC_DIR)
-    file_loc = []
+def get_mfcc_frames(save_loc, args):
+    utt2num_frames = join_path(save_loc, UTT2NUM_FRAMES_FILE)
+    utt2num_frames_dict = spaced_file_to_dict(utt2num_frames)
+    frames = []
+    count = 0
     for a in args:
-        file_loc.append(join_path(mfcc_loc, a + '.npy'))
-    return np.array(run_parallel(get_frame, file_loc, n_jobs)).reshape([-1, 1])
+        try:
+            frames.append(utt2num_frames_dict[a])
+        except KeyError:
+            count = count + 1
+    if count > 0:
+        print('MFCC FRAMES: Can not find {} utterances in utt2num_frames'.format(count))
+    return np.array(frames).reshape([-1, 1])
 
 
 def load_feature(file_name):
     return load_array(file_name)
+
+
+def remove_bad_files(args_list, save_loc='../save'):
+    feats_scp = join_path(save_loc, FEATS_SCP_FILE)
+    feats_scp_dict = spaced_file_to_dict(feats_scp)
+
+    bad_files = []
+    for i, key in enumerate(args_list[:, 0]):
+        try:
+            _ = feats_scp_dict[key]
+        except KeyError:
+            bad_files.append(i)
+    return np.delete(args_list, bad_files, axis=0)
 
 
 def remove_present_from_scp(save_loc, n_jobs=10):
@@ -156,23 +171,3 @@ def remove_present_from_scp(save_loc, n_jobs=10):
     with open(data_scp_file, 'w') as f:
         f.writelines(scp_list)
     return sum(absent)
-
-
-def window_cmvn(x, window_len=301, var_norm=True):
-    if window_len < 3 or (window_len & 1) != 1:
-        raise ValueError('Window length should be an odd integer >= 3')
-    n_dim, n_obs = x.shape
-    if n_obs < window_len:
-        return cmvn(x, var_norm)
-    h_len = int((window_len - 1) / 2)
-    y = np.zeros((n_dim, n_obs), dtype=x.dtype)
-    y[:, :h_len] = x[:, :h_len] - x[:, :window_len].mean(1, keepdims=True)
-    for ix in range(h_len, n_obs-h_len):
-        y[:, ix] = x[:, ix] - x[:, ix-h_len:ix+h_len+1].mean(1)
-    y[:, n_obs-h_len:n_obs] = x[:, n_obs-h_len:n_obs] - x[:, n_obs - window_len:].mean(1, keepdims=True)
-    if var_norm:
-        y[:, :h_len] /= (x[:, :window_len].std(1, keepdims=True) + 1e-20)
-        for ix in range(h_len, n_obs-h_len):
-            y[:, ix] /= (x[:, ix-h_len:ix+h_len+1].std(1) + 1e-20)
-        y[:, n_obs-h_len:n_obs] /= (x[:, n_obs - window_len:].std(1, keepdims=True) + 1e-20)
-    return y

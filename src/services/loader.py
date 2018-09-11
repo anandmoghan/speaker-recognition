@@ -2,9 +2,10 @@ from os.path import join as join_path
 
 import numpy as np
 
-from constants.app_constants import MFCC_DIR
+from constants.app_constants import MFCC_DIR, FEATS_SCP_FILE, TMP_DIR
 from services.common import run_parallel, load_array
 from services.feature import load_feature
+from services.kaldi import spaced_file_to_dict, read_feats, read_feat
 
 
 class SREBatchLoader:
@@ -18,6 +19,9 @@ class SREBatchLoader:
         if not self.data_len == self.classes.shape[0]:
             raise RuntimeError('Length of input and classes does not match.')
 
+        self.feats_dict = spaced_file_to_dict(join_path(location, FEATS_SCP_FILE))
+        self.tmp_loc = join_path(location, TMP_DIR)
+
         self.batch_size = batch_size
         self.batch_pointer = 0
         self.n_batches = int(self.data_len / batch_size)
@@ -29,7 +33,11 @@ class SREBatchLoader:
         return self.batch_size
 
     def load_feature(self, idx):
-        return load_array(join_path(self.location, '{}.npy'.format(self.feature_idx[idx])))
+        # return load_array(join_path(self.location, '{}.npy'.format(self.feature_idx[idx])))
+        scp_file = join_path(self.tmp_loc, '{}.scp'.format(idx))
+        with open(scp_file, 'w') as f:
+            f.write('{} {}\n'.format(idx, self.feats_dict[idx]))
+        return read_feats
 
     def next(self):
         current_split = self.batch_splits[self.batch_pointer]
@@ -87,6 +95,9 @@ class SRESplitBatchLoader:
     def get_batch_size(self):
         return self.batch_size[self.current_split]
 
+    def get_splits(self):
+        return list(range(0, len(self.splits) - 1))
+
     def next(self):
         current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
         self.batch_pointer = self.batch_pointer + 1
@@ -123,16 +134,49 @@ class SRESplitBatchLoader:
         return self.n_batches
 
 
+class SRESplitKaldiBatchLoader(SRESplitBatchLoader):
+    def __init__(self, location, args, n_features, splits, batch_size):
+        super().__init__(location, args, n_features, splits, batch_size)
+        feats_scp = join_path(location, FEATS_SCP_FILE)
+        feats_scp_dict = spaced_file_to_dict(feats_scp)
+
+        self.index_list = args[:, 0]
+        self.feats_dict = dict([(idx, feats_scp_dict[idx]) for idx in args[:, 0]])
+        self.tmp_scp_file = join_path(location, '{}/read_feats.scp'.format(TMP_DIR))
+
+    def next(self):
+        current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
+        self.batch_pointer = self.batch_pointer + 1
+        if self.batch_pointer == self.n_batches:
+            self.reset()
+
+        frame_len = self.splits[self.current_split]
+        frames = self.frames[current_batch_idx]
+
+        with open(self.tmp_scp_file, 'w') as f:
+            for i, f_len in enumerate(frames):
+                if f_len > frame_len:
+                    idx = np.random.choice(f_len - frame_len, 1)[0]
+                else:
+                    idx = 0
+                utt = self.index_list[current_batch_idx[i]]
+                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], idx, idx + frame_len - 1))
+
+        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
+        return np.array(np_features), self.speakers[current_batch_idx]
+
+
 class SRETestLoader:
-    def __init__(self, location, args, n_features, batch_size):
+    def __init__(self, location, args, n_features, max_frame, batch_size):
         location = join_path(location, MFCC_DIR)
         self.frames = np.array(args[:, -1], dtype=int)
         idx = np.argsort(self.frames)
-        args = args[idx]
+        args = args[idx, :]
         self.frames = self.frames[idx]
         self.args_idx = args[:, 0]
         self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
         self.n_features = n_features
+        self.max_frame = max_frame
         self.batch_size = batch_size
         self.multiple = 1
 
@@ -140,6 +184,9 @@ class SRETestLoader:
         data_len = self.frames.shape[0]
         self.n_batches = int(data_len / batch_size)
         self.batch_splits = np.array_split(np.linspace(0, data_len - 1, data_len, dtype=int), self.n_batches)
+
+    def get_current_batch(self):
+        return self.batch_pointer
 
     def get_batch_size(self):
         return self.batch_size
@@ -150,10 +197,11 @@ class SRETestLoader:
 
         current_batch_idx = self.batch_splits[self.batch_pointer]
         self.batch_pointer = self.batch_pointer + 1
-
         self.batch_size = len(current_batch_idx)
+
         frames = self.frames[current_batch_idx]
-        frame_len = int(frames[0] / self.multiple) * self.multiple
+        max_frame = self.max_frame if frames[0] > self.max_frame else frames[0]
+        frame_len = int(max_frame / self.multiple) * self.multiple
         file_loc = self.file_loc[current_batch_idx]
         np_features = np.zeros([self.batch_size, self.n_features, frame_len])
         features = run_parallel(load_feature, file_loc, n_workers=6, p_bar=False)
@@ -169,8 +217,42 @@ class SRETestLoader:
     def set_multiple(self, value):
         self.multiple = value
 
+    def set_current_batch(self, value):
+        self.batch_pointer = value
+
     def total_batches(self):
         return self.n_batches
+
+
+class SREKaldiTestLoader(SRETestLoader):
+    def __init__(self, location, args, n_features, max_frame, batch_size, model_tag):
+        super().__init__(location, args, n_features, max_frame, batch_size)
+        feats_scp = join_path(location, FEATS_SCP_FILE)
+        feats_scp_dict = spaced_file_to_dict(feats_scp)
+
+        self.feats_dict = dict([(idx, feats_scp_dict[idx]) for idx in args[:, 0]])
+        self.tmp_scp_file = join_path(location, '{}/{}_test_read_feats.scp'.format(TMP_DIR, model_tag))
+
+    def next(self):
+        if self.batch_pointer == self.n_batches:
+            raise Exception('No batches left.')
+
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        self.batch_pointer = self.batch_pointer + 1
+        self.batch_size = len(current_batch_idx)
+
+        frames = self.frames[current_batch_idx]
+        max_frame = self.max_frame if frames[0] > self.max_frame else frames[0]
+        frame_len = int(max_frame / self.multiple) * self.multiple
+        frames = self.frames[current_batch_idx]
+
+        with open(self.tmp_scp_file, 'w') as f:
+            for i, f_len in enumerate(frames):
+                utt = self.args_idx[current_batch_idx[i]]
+                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], 0, frame_len - 1))
+
+        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
+        return np.array(np_features), self.args_idx[current_batch_idx]
 
 
 class OnlineBatchLoader:
