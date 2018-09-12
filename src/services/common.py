@@ -68,6 +68,13 @@ def get_file_list_as_dict(location, pattern='*.sph'):
     return file_list
 
 
+def get_index_array(max_len, shuffle=False):
+    if shuffle:
+        return np.random.permutation(max_len)
+    else:
+        return np.linspace(0, max_len - 1, max_len, dtype=int)
+
+
 def load_array(file_name):
     return np.load(file_name)
 
@@ -128,6 +135,12 @@ def save_object(file_name, obj):
 
 def sort_by_index(args_list):
     return args_list[args_list[:, 0].argsort()]
+
+
+def split_args_list(args_list, split=0.1, shuffle=True):
+    idx = get_index_array(args_list.shape[0], shuffle)
+    split = int(split * args_list.shape[0])
+    return args_list[idx[:split], :], args_list[idx[split:], :]
 
 
 def tensorflow_debug(debug=False):

@@ -2,357 +2,144 @@ from os.path import join as join_path
 
 import numpy as np
 
-from constants.app_constants import MFCC_DIR, FEATS_SCP_FILE, TMP_DIR
-from services.common import run_parallel, load_array
-from services.feature import load_feature
-from services.kaldi import spaced_file_to_dict, read_feats, read_feat
+from constants.app_constants import FEATS_SCP_FILE, TMP_SCP_FILE
+from services.common import get_index_array
+from services.kaldi import spaced_file_to_dict, read_feats
 
 
-class SREBatchLoader:
-    def __init__(self, location, args, n_features, speaker_dict, batch_size):
-        self.location = join_path(location, MFCC_DIR)
-        self.classes = np.array([speaker_dict[k] for k in args[:, 3]])
-        self.feature_idx = np.array(args[:, 0])
-        self.n_features = n_features
-        self.frames = np.array(args[:, -1], dtype=int)
-        self.data_len = self.feature_idx.shape[0]
-        if not self.data_len == self.classes.shape[0]:
-            raise RuntimeError('Length of input and classes does not match.')
-
-        self.feats_dict = spaced_file_to_dict(join_path(location, FEATS_SCP_FILE))
-        self.tmp_loc = join_path(location, TMP_DIR)
-
+class BatchLoader:
+    def __init__(self, args_list, n_features, batch_size, model_tag, multiple=1, shuffle=True, save_loc='../save'):
         self.batch_size = batch_size
+        self.n_features = n_features
+        self.save_loc = save_loc
+        self.multiple = multiple
+        self.shuffle = shuffle
+
+        idx = np.argsort(args_list[:, -1])
+        self.index_list = np.array(args_list[idx, 0])
+        self.frames = np.array(args_list[idx, -1], dtype=int)
+        self.labels = np.array(args_list[idx, 3])
+
+        self.feats_dict = spaced_file_to_dict(join_path(save_loc, FEATS_SCP_FILE))
+        self.tmp_scp_file = '{}_{}'.format(join_path(save_loc, TMP_SCP_FILE), model_tag)
+
         self.batch_pointer = 0
-        self.n_batches = int(self.data_len / batch_size)
-        self.max_size = self.n_batches * batch_size
-        self.permutation_idx = np.random.permutation(self.data_len)
-        self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
+        self.n_batches = int(self.index_list.shape[0] / batch_size) + (0 if args_list.shape[0] % batch_size == 0 else 1)
+        idx = get_index_array(self.index_list.shape[0], shuffle)
+        self.batch_splits = np.array_split(idx, self.n_batches)
 
     def get_batch_size(self):
         return self.batch_size
 
-    def load_feature(self, idx):
-        # return load_array(join_path(self.location, '{}.npy'.format(self.feature_idx[idx])))
-        scp_file = join_path(self.tmp_loc, '{}.scp'.format(idx))
-        with open(scp_file, 'w') as f:
-            f.write('{} {}\n'.format(idx, self.feats_dict[idx]))
-        return read_feats
+    def get_current_batch(self):
+        return self.batch_pointer
 
-    def next(self):
-        current_split = self.batch_splits[self.batch_pointer]
+    def increment_pointer(self):
         self.batch_pointer = self.batch_pointer + 1
         if self.batch_pointer == self.n_batches:
             self.reset()
-        frames = self.frames[current_split]
-        max_len = max(frames)
-        if sum(frames/max_len < 0.95) < (0.05 * self.batch_size):
-            print('Batch formation issue.')
-            return self.next()
-        np_features = np.zeros([self.batch_size, self.n_features, max_len])
-        features = run_parallel(self.load_feature, current_split, n_workers=6, p_bar=False)
-        for i, f in enumerate(features):
-            np_features[i, :, max_len - frames[i]:] = f
-        return np_features, self.classes[current_split]
+
+    def next(self):
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        self.batch_size = len(current_batch_idx)
+        self.increment_pointer()
+
+        frames = self.frames[current_batch_idx]
+        labels = np.array(self.labels[current_batch_idx])
+        max_len = int(frames[0] / self.multiple) * self.multiple
+
+        with open(self.tmp_scp_file, 'w') as f:
+            for i, f_len in enumerate(frames):
+                if f_len > max_len and self.shuffle:
+                    idx = np.random.choice(f_len - max_len, 1)[0]
+                else:
+                    idx = 0
+                utt = self.index_list[current_batch_idx[i]]
+                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], idx, idx + max_len - 1))
+
+        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
+        return np.array(np_features), labels
 
     def reset(self):
+        idx = get_index_array(self.index_list.shape[0], self.shuffle)
         self.batch_pointer = 0
-        self.permutation_idx = np.random.permutation(self.data_len)
-        self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
+        self.batch_splits = np.array_split(idx, self.n_batches)
+
+    def set_current_batch(self, value):
+        self.batch_pointer = value
+
+    def set_multiple(self, value):
+        self.multiple = value
 
     def total_batches(self):
         return self.n_batches
 
 
-class SRESplitBatchLoader:
-    def __init__(self, location, args, n_features, splits, batch_size):
-        location = join_path(location, MFCC_DIR)
-        self.frames = np.array(args[:, -1], dtype=int)
-        self.data_len = self.frames.shape[0]
-        self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
-        self.speakers = args[:, 3]
-        self.n_features = n_features
-        self.batch_size = batch_size if type(batch_size) is list else [batch_size] * (len(splits) - 1)
-        self.current_split = 0
-        self.splits = splits
+class FixedBatchLoader(BatchLoader):
+    def __init__(self, args_list, n_features, batch_size, max_frames, model_tag, multiple=1, shuffle=True, save_loc='../save'):
+        super().__init__(args_list, n_features, batch_size, model_tag, multiple, shuffle, save_loc)
+        self.max_frames = max_frames
+        self.multiple = multiple
 
-        index = np.arange(0, self.data_len, dtype=int)
+    def next(self):
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        self.batch_size = len(current_batch_idx)
+        self.increment_pointer()
+
+        frames = self.frames[current_batch_idx]
+        labels = np.array(self.labels[current_batch_idx])
+        max_len = np.min(frames) if self.max_frames > np.min(frames) else self.max_frames
+        max_len = int(max_len / self.multiple) * self.multiple
+
+        with open(self.tmp_scp_file, 'w') as f:
+            for i, f_len in enumerate(frames):
+                if f_len > max_len and self.shuffle:
+                    idx = np.random.choice(f_len - max_len, 1)[0]
+                else:
+                    idx = 0
+                utt = self.index_list[current_batch_idx[i]]
+                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], idx, idx + max_len - 1))
+
+        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
+        return np.array(np_features), labels
+
+
+class SplitBatchLoader:
+    def __init__(self, args_list, n_features, batch_size, splits, model_tag, multiple=1, shuffle=True, save_loc='../save'):
+        idx = np.argsort(args_list[:, -1])
+        frames = np.array(args_list[idx, -1], dtype=int)
+
         start = 0
-        free_start = np.where(self.frames > splits[len(splits) - 1])[0][0]
-        self.splits_index = []
+        free_start = np.where(frames > splits[len(splits) - 1])[0][0]
+        self.batch_loaders = []
         for s in splits[1:]:
-            end = np.where(self.frames > s)[0][0]
-            self.splits_index.append(np.hstack([index[start: end], index[free_start:]]))
+            end = np.where(frames > s)[0][0]
+            split_idx = np.hstack([idx[start: end], idx[free_start:]])
+            self.batch_loaders.append(FixedBatchLoader(args_list[split_idx, :], n_features, batch_size, s, model_tag, multiple, shuffle, save_loc))
             start = end
 
-        self.batch_pointer = 0
-        self.current_split_index = self.splits_index[self.current_split]
-        self.n_batches = int(len(self.current_split_index) / self.batch_size[self.current_split])
-        self.permutation_idx = np.random.permutation(len(self.current_split_index))
-        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size[self.current_split]],
-                                           self.n_batches)
+        self.splits = splits
+        self.current_split = 0
+        self.current_batch_loader = self.batch_loaders[self.current_split]
 
     def get_batch_size(self):
-        return self.batch_size[self.current_split]
+        return self.current_batch_loader.get_batch_size()
+
+    def get_current_batch(self):
+        return self.current_batch_loader.get_current_batch()
 
     def get_splits(self):
         return list(range(0, len(self.splits) - 1))
 
     def next(self):
-        current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
-        self.batch_pointer = self.batch_pointer + 1
-        if self.batch_pointer == self.n_batches:
-            self.reset()
-
-        frame_len = self.splits[self.current_split]
-        frames = self.frames[current_batch_idx]
-        file_loc = self.file_loc[current_batch_idx]
-        np_features = np.zeros([self.batch_size[self.current_split], self.n_features, frame_len])
-        features = run_parallel(load_feature, file_loc, n_workers=10, p_bar=False)
-        for i, f in enumerate(features):
-            f_len = frames[i]
-            if f_len > frame_len:
-                idx = np.random.choice(f_len - frame_len, 1)[0]
-            else:
-                idx = 0
-            np_features[i, :, :] = f[:, idx:(idx + frame_len)]
-        return np_features, self.speakers[current_batch_idx]
+        return self.current_batch_loader.next()
 
     def reset(self):
-        self.batch_pointer = 0
-        self.permutation_idx = np.random.permutation(len(self.current_split_index))
-        self.batch_splits = np.array_split(self.permutation_idx[:self.n_batches * self.batch_size[self.current_split]],
-                                           self.n_batches)
+        self.current_batch_loader.reset()
 
-    def set_split(self, split):
-        self.current_split = split
-        self.current_split_index = self.splits_index[split]
-        self.n_batches = int(len(self.current_split_index) / self.batch_size[self.current_split])
-        self.reset()
+    def set_split(self, value):
+        self.current_split = value
+        self.current_batch_loader = self.batch_loaders[self.current_split]
 
     def total_batches(self):
-        return self.n_batches
-
-
-class SRESplitKaldiBatchLoader(SRESplitBatchLoader):
-    def __init__(self, location, args, n_features, splits, batch_size):
-        super().__init__(location, args, n_features, splits, batch_size)
-        feats_scp = join_path(location, FEATS_SCP_FILE)
-        feats_scp_dict = spaced_file_to_dict(feats_scp)
-
-        self.index_list = args[:, 0]
-        self.feats_dict = dict([(idx, feats_scp_dict[idx]) for idx in args[:, 0]])
-        self.tmp_scp_file = join_path(location, '{}/read_feats.scp'.format(TMP_DIR))
-
-    def next(self):
-        current_batch_idx = self.current_split_index[self.batch_splits[self.batch_pointer]]
-        self.batch_pointer = self.batch_pointer + 1
-        if self.batch_pointer == self.n_batches:
-            self.reset()
-
-        frame_len = self.splits[self.current_split]
-        frames = self.frames[current_batch_idx]
-
-        with open(self.tmp_scp_file, 'w') as f:
-            for i, f_len in enumerate(frames):
-                if f_len > frame_len:
-                    idx = np.random.choice(f_len - frame_len, 1)[0]
-                else:
-                    idx = 0
-                utt = self.index_list[current_batch_idx[i]]
-                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], idx, idx + frame_len - 1))
-
-        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
-        return np.array(np_features), self.speakers[current_batch_idx]
-
-
-class SRETestLoader:
-    def __init__(self, location, args, n_features, max_frame, batch_size):
-        location = join_path(location, MFCC_DIR)
-        self.frames = np.array(args[:, -1], dtype=int)
-        idx = np.argsort(self.frames)
-        args = args[idx, :]
-        self.frames = self.frames[idx]
-        self.args_idx = args[:, 0]
-        self.file_loc = np.array([join_path(location, x + '.npy') for x in args[:, 0]])
-        self.n_features = n_features
-        self.max_frame = max_frame
-        self.batch_size = batch_size
-        self.multiple = 1
-
-        self.batch_pointer = 0
-        data_len = self.frames.shape[0]
-        self.n_batches = int(data_len / batch_size)
-        self.batch_splits = np.array_split(np.linspace(0, data_len - 1, data_len, dtype=int), self.n_batches)
-
-    def get_current_batch(self):
-        return self.batch_pointer
-
-    def get_batch_size(self):
-        return self.batch_size
-
-    def next(self):
-        if self.batch_pointer == self.n_batches:
-            raise Exception('No batches left.')
-
-        current_batch_idx = self.batch_splits[self.batch_pointer]
-        self.batch_pointer = self.batch_pointer + 1
-        self.batch_size = len(current_batch_idx)
-
-        frames = self.frames[current_batch_idx]
-        max_frame = self.max_frame if frames[0] > self.max_frame else frames[0]
-        frame_len = int(max_frame / self.multiple) * self.multiple
-        file_loc = self.file_loc[current_batch_idx]
-        np_features = np.zeros([self.batch_size, self.n_features, frame_len])
-        features = run_parallel(load_feature, file_loc, n_workers=6, p_bar=False)
-        for i, f in enumerate(features):
-            f_len = frames[i]
-            if f_len > frame_len:
-                idx = np.random.choice(f_len - frame_len, 1)[0]
-            else:
-                idx = 0
-            np_features[i, :, :] = f[:, idx:(idx + frame_len)]
-        return np_features, self.args_idx[current_batch_idx]
-
-    def set_multiple(self, value):
-        self.multiple = value
-
-    def set_current_batch(self, value):
-        self.batch_pointer = value
-
-    def total_batches(self):
-        return self.n_batches
-
-
-class SREKaldiTestLoader(SRETestLoader):
-    def __init__(self, location, args, n_features, max_frame, batch_size, model_tag):
-        super().__init__(location, args, n_features, max_frame, batch_size)
-        feats_scp = join_path(location, FEATS_SCP_FILE)
-        feats_scp_dict = spaced_file_to_dict(feats_scp)
-
-        self.feats_dict = dict([(idx, feats_scp_dict[idx]) for idx in args[:, 0]])
-        self.tmp_scp_file = join_path(location, '{}/{}_test_read_feats.scp'.format(TMP_DIR, model_tag))
-
-    def next(self):
-        if self.batch_pointer == self.n_batches:
-            raise Exception('No batches left.')
-
-        current_batch_idx = self.batch_splits[self.batch_pointer]
-        self.batch_pointer = self.batch_pointer + 1
-        self.batch_size = len(current_batch_idx)
-
-        frames = self.frames[current_batch_idx]
-        max_frame = self.max_frame if frames[0] > self.max_frame else frames[0]
-        frame_len = int(max_frame / self.multiple) * self.multiple
-        frames = self.frames[current_batch_idx]
-
-        with open(self.tmp_scp_file, 'w') as f:
-            for i, f_len in enumerate(frames):
-                utt = self.args_idx[current_batch_idx[i]]
-                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], 0, frame_len - 1))
-
-        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
-        return np.array(np_features), self.args_idx[current_batch_idx]
-
-
-class OnlineBatchLoader:
-    def __init__(self, args_list, feature_extractor, batch_size):
-        self.args_list = args_list
-        self.location_list = args_list[:, 0]
-        self.file_idx = args_list[:, 2]
-        self.speakers = args_list[:, 3]
-        self.feature_extractor = feature_extractor
-        self.data_len = args_list.shape[0]
-
-        self.batch_size = batch_size
-        self.batch_pointer = 0
-        self.n_batches = int(self.data_len / batch_size)
-        self.max_size = self.n_batches * batch_size
-        self.permutation_idx = np.random.permutation(self.data_len)
-        self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
-
-    def get_batch_size(self):
-        return self.batch_size
-
-    def next(self):
-        current_split = self.batch_splits[self.batch_pointer]
-        features = run_parallel(self.feature_extractor.extract_piped_file_with_sad_and_cmvn,
-                                args_list=self.args_list[current_split], n_workers=10, p_bar=False)
-        feature_len = features[0].shape[0]
-        frames_list = [f.shape[1] for f in features]
-        max_frames = max(frames_list)
-        np_features = np.zeros([self.batch_size, feature_len, max_frames])
-        for i, f in enumerate(features):
-            np_features[i, :, max_frames - frames_list[i]:] = f
-        self.batch_pointer = self.batch_pointer + 1
-        if self.batch_pointer == self.n_batches:
-            self.reset()
-        return np_features
-
-    def reset(self):
-        self.batch_pointer = 0
-        self.permutation_idx = np.random.permutation(self.data_len)
-        self.batch_splits = np.array_split(self.permutation_idx[:self.max_size], self.n_batches)
-
-
-class SREFixedLoader:
-    # duration and strides in frames count
-    def __init__(self, location, args, n_features, duration, stride, batch_size, n_jobs=10):
-        location = join_path(location, MFCC_DIR)
-        frames = np.array(args[:, -1], dtype=int)
-        self.n_features = n_features
-        self.batch_size = batch_size
-        self.duration = duration
-        self.stride = stride
-        self.n_jobs = n_jobs
-
-        self.file_loc = []
-        self.start = []
-        self.speakers = []
-
-        for i, key in enumerate(args[:, 0]):
-            frame = frames[i]
-            n_egs = int(frame / self.stride)
-            if (frame - (n_egs - 1) * self.stride) <= self.duration:
-                n_egs = n_egs - 1
-            file_loc = join_path(location, key + '.npy')
-            for e in range(n_egs):
-                self.file_loc.append(file_loc)
-                self.start.append(e * self.stride)
-                self.speakers.append(args[i, 3])
-
-        self.file_loc = np.array(self.file_loc)
-        self.start = np.array(self.start)
-        self.speakers = np.array(self.speakers)
-
-        self.batch_pointer = 0
-        self.n_batches = int(self.speakers.shape[0] / batch_size)
-        self.data_len = self.n_batches * batch_size
-        self.permutation_idx = np.random.permutation(len(self.speakers))[:self.data_len]
-        self.batch_splits = np.array_split(self.permutation_idx, self.n_batches)
-
-    def get_batch_size(self):
-        return self.batch_size
-
-    def next(self):
-        current_batch_idx = self.batch_splits[self.batch_pointer]
-        self.batch_pointer = self.batch_pointer + 1
-        if self.batch_pointer == self.n_batches:
-            self.reset()
-
-        file_loc = self.file_loc[current_batch_idx]
-        start_idx = self.start[current_batch_idx]
-
-        np_features = np.zeros([self.batch_size, self.n_features, self.duration])
-        features = run_parallel(load_feature, file_loc, n_workers=self.n_jobs, p_bar=False)
-        for i, f in enumerate(features):
-            np_features[i, :, :] = f[:, start_idx[i]:(start_idx[i] + self.duration)]
-        return np_features, self.speakers[current_batch_idx]
-
-    def reset(self):
-        self.batch_pointer = 0
-        self.permutation_idx = np.random.permutation(self.speakers.shape[0])[:self.data_len]
-        self.batch_splits = np.array_split(self.permutation_idx, self.n_batches)
-
-    def total_batches(self):
-        return self.n_batches
+        return self.current_batch_loader.total_batches()

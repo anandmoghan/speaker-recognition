@@ -6,12 +6,12 @@ import numpy as np
 
 from constants.app_constants import DATA_DIR, DATA_SCP_FILE, TRAIN_SPLIT, ENROLL_SPLIT, TEST_SPLIT, UNLABELLED_SPLIT, \
     TRIALS_FILE
+from models.hierarchical import HGRUModel
 from models.x_vector import XVectorModel
 from services.checks import check_mfcc, check_embeddings
 from services.common import create_directories, load_object, save_object, tensorflow_debug, use_gpu
 from services.feature import MFCC, generate_data_scp, get_mfcc_frames, remove_bad_files
 from services.kaldi import PLDA, convert_embeddings
-from services.loader import SRESplitKaldiBatchLoader, SREKaldiTestLoader
 from services.logger import Logger
 from services.sre_data import get_train_data, make_sre16_eval_data, make_sre16_unlabelled_data, make_sre16_trials_file
 
@@ -21,7 +21,7 @@ parser = ap.ArgumentParser()
 parser.add_argument('--batch-size', type=int, default=128, help='Training Batch Size')
 parser.add_argument('--cont', action='store_true', help='Continue Training')
 parser.add_argument('--decay', type=float, default=0.2, help='Decay Rate')
-parser.add_argument('--epochs', type=int, default=3, help='Number of Epochs')
+parser.add_argument('--epochs', type=int, default=2, help='Number of Epochs')
 parser.add_argument('--extract-batch-size', type=int, default=56, help='Extract Batch Size')
 parser.add_argument('--gpu', type=int, default=0, help='Select GPU')
 parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
@@ -168,7 +168,7 @@ if args.stage <= 2:
     save_object(join_path(args.save, 'speaker_to_idx.pkl'), speaker_to_idx)
     save_object(join_path(args.save, 'idx_to_speaker.pkl'), idx_to_speaker)
     logger.end_timer('Stage 2:')
-else:
+elif args.stage < 7:
     logger.start_timer('Load: Loading speaker dictionaries...')
     speaker_to_idx = load_object(join_path(args.save, 'speaker_to_idx.pkl'))
     idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
@@ -178,34 +178,23 @@ else:
 
 if args.stage <= 4:
     n_speakers = len(set(train_data[:, 3]))
-    model = XVectorModel(n_features=args.num_features, n_classes=n_speakers, attention=False, model_tag=args.model_tag)
-    # model = HGRUTripletModel(n_features=args.num_features, n_classes=n_speakers, attention=True, model_tag=args.model_tag)
+    # model = XVectorModel(n_features=args.num_features, n_classes=n_speakers, attention=False, model_tag=args.model_tag)
+    model = HGRUModel(n_features=args.num_features, n_classes=n_speakers, attention=True, model_tag=args.model_tag)
     if args.stage <= 3:
         logger.start_timer('Stage 3: Train Neural Net.')
-        logger.info('Stage 3: Initializing batch loader...')
-        batch_loader = SRESplitKaldiBatchLoader(location=args.save, args=train_data, n_features=args.num_features,
-                                                splits=[200, 300, 400, 500], batch_size=args.batch_size)
-        logger.info('Stage 3: Training model...')
-        model.start_train_with_splits(args.save, batch_loader, args.epochs, args.lr, args.decay, cont=args.cont)
+        model.start_train_with_splits(args_list=train_data, splits=[200, 300, 400, 500], epochs=args.epochs, lr=args.lr,
+                                      decay=args.decay, batch_size=args.batch_size, save_loc=args.save, cont=args.cont)
         logger.end_timer('Stage 3:')
 
     logger.start_timer('Stage 4: Embedding Extraction.')
     logger.info('Stage 4: Processing train_data...')
-    train_loader = SREKaldiTestLoader(args.save, train_data, args.num_features, 10000, args.extract_batch_size,
-                                      model_tag=args.model_tag)
-    model.extract(args.save, train_loader)
+    model.extract(train_data, args.extract_batch_size, args.save)
     logger.info('Stage 4: Processing sre_unlabelled...')
-    unlabelled_loader = SREKaldiTestLoader(args.save, sre_unlabelled, args.num_features, 10000, args.extract_batch_size,
-                                           model_tag=args.model_tag)
-    model.extract(args.save, unlabelled_loader)
+    model.extract(sre_unlabelled, args.extract_batch_size, args.save)
     logger.info('Stage 4: Processing sre_enroll...')
-    enroll_loader = SREKaldiTestLoader(args.save, sre_enroll, args.num_features, 10000, args.extract_batch_size,
-                                       model_tag=args.model_tag)
-    model.extract(args.save, enroll_loader)
+    model.extract(sre_enroll, args.extract_batch_size, args.save)
     logger.info('Stage 4: Processing sre_test...')
-    test_loader = SREKaldiTestLoader(args.save, sre_test, args.num_features, 10000, args.extract_batch_size,
-                                     model_tag=args.model_tag)
-    model.extract(args.save, test_loader)
+    model.extract(sre_test, args.extract_batch_size, args.save)
     logger.end_timer('Stage 4:')
 elif not args.skip_check and args.stage < 6:
     logger.start_timer('Check: Looking for Embeddings...')
