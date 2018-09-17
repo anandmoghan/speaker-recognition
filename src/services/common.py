@@ -133,6 +133,16 @@ def save_object(file_name, obj):
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
 
+def split_dict(old_dict, keys):
+    new_dict = dict()
+    for key in keys:
+        try:
+            new_dict[key] = old_dict[key]
+        except KeyError:
+            raise Exception('{}: {} not found.'.format('SPLIT_DICT KeyError', key))
+    return new_dict
+
+
 def sort_by_index(args_list):
     return args_list[args_list[:, 0].argsort()]
 

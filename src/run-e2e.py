@@ -6,6 +6,7 @@ import numpy as np
 
 from constants.app_constants import DATA_DIR, DATA_SCP_FILE, TRAIN_SPLIT, ENROLL_SPLIT, TEST_SPLIT, UNLABELLED_SPLIT, \
     TRIALS_FILE
+from models.attention_model import AttentionModel
 from models.hierarchical import HGRUModel
 from models.x_vector import XVectorModel
 from services.checks import check_mfcc, check_embeddings
@@ -20,9 +21,8 @@ DATA_CONFIG = '../configs/sre_data.json'
 parser = ap.ArgumentParser()
 parser.add_argument('--batch-size', type=int, default=128, help='Training Batch Size')
 parser.add_argument('--cont', action='store_true', help='Continue Training')
-parser.add_argument('--decay', type=float, default=0.8, help='Decay Rate')
-parser.add_argument('--epochs', type=int, default=5, help='Number of Epochs')
-parser.add_argument('--extract-batch-size', type=int, default=56, help='Extract Batch Size')
+parser.add_argument('--decay', type=float, default=0.9, help='Decay Rate')
+parser.add_argument('--epochs', type=int, default=20, help='Number of Epochs')
 parser.add_argument('--gpu', type=int, default=0, help='Select GPU')
 parser.add_argument('--lr', type=float, default=0.001, help='Learning Rate')
 parser.add_argument('--model-tag', default='XVECTOR', help='Model Tag')
@@ -79,7 +79,7 @@ if args.stage <= 1:
     logger.info('Stage 1: Saved data scp file at: {}'.format(data_loc))
 
     data_scp_file = join_path(args.save, DATA_SCP_FILE)
-    mfcc = MFCC(fs=args.sample_rate, fl=20, fh=3700, frame_len_ms=25, n_ceps=args.num_features, n_jobs=2 * args.num_jobs,
+    mfcc = MFCC(fs=args.sample_rate, fl=20, fh=3700, frame_len_ms=25, n_ceps=args.num_features, n_jobs=args.num_jobs,
                 save_loc=args.save)
     mfcc.extract_with_vad_and_normalization(data_scp_file)
 
@@ -168,7 +168,7 @@ if args.stage <= 2:
     save_object(join_path(args.save, 'speaker_to_idx.pkl'), speaker_to_idx)
     save_object(join_path(args.save, 'idx_to_speaker.pkl'), idx_to_speaker)
     logger.end_timer('Stage 2:')
-elif args.stage < 7:
+else:
     logger.start_timer('Load: Loading speaker dictionaries...')
     speaker_to_idx = load_object(join_path(args.save, 'speaker_to_idx.pkl'))
     idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
@@ -177,58 +177,15 @@ elif args.stage < 7:
     logger.end_timer('Load:')
 
 if args.stage <= 4:
-    n_speakers = len(set(train_data[:, 3]))
     # model = XVectorModel(n_features=args.num_features, n_classes=n_speakers, attention=False, model_tag=args.model_tag)
-    model = HGRUModel(n_features=args.num_features, n_classes=n_speakers, attention=True, model_tag=args.model_tag)
+    model = AttentionModel(n_features=args.num_features, n_classes=2, model_tag=args.model_tag)
     if args.stage <= 3:
         logger.start_timer('Stage 3: Train Neural Net.')
-        model.start_train_with_splits(args_list=train_data, splits=[200, 300, 400, 500, 600], epochs=args.epochs, lr=args.lr,
-                                      decay=args.decay, batch_size=args.batch_size, save_loc=args.save, cont=args.cont)
+        model.start_train(args_list=train_data, idx_to_label=idx_to_speaker, epochs=args.epochs, lr=args.lr,
+                          decay=args.decay, batch_size=args.batch_size, save_loc=args.save, cont=args.cont)
         logger.end_timer('Stage 3:')
 
-    logger.start_timer('Stage 4: Embedding Extraction.')
+    logger.start_timer('Stage 4: Scoring.')
     logger.info('Stage 4: Processing train_data...')
-    model.extract(train_data, args.extract_batch_size, args.save)
-    logger.info('Stage 4: Processing sre_unlabelled...')
-    model.extract(sre_unlabelled, args.extract_batch_size, args.save)
-    logger.info('Stage 4: Processing sre_enroll...')
-    model.extract(sre_enroll, args.extract_batch_size, args.save)
-    logger.info('Stage 4: Processing sre_test...')
-    model.extract(sre_test, args.extract_batch_size, args.save)
+
     logger.end_timer('Stage 4:')
-elif not args.skip_check and args.stage < 6:
-    logger.start_timer('Check: Looking for Embeddings...')
-    _, fail1 = check_embeddings(args.save, args.model_tag, train_data)
-    _, fail2 = check_embeddings(args.save, args.model_tag, sre_unlabelled)
-    _, fail3 = check_embeddings(args.save, args.model_tag, sre_enroll)
-    _, fail4 = check_embeddings(args.save, args.model_tag, sre_test)
-    fail = fail1 + fail2 + fail3 + fail4
-    if fail > 0:
-        logger.info('No embeddings for {:d} files. Execute Stage 4 before proceeding.'.format(fail))
-    logger.end_timer('Check:')
-
-if args.stage <= 5:
-    logger.start_timer('Stage 5: Kaldi ARK embedding conversion.')
-    logger.info('Stage 5: Processing train_data embeddings...')
-    convert_embeddings(train_data[:, 0], args.model_tag, split=TRAIN_SPLIT, save_loc=args.save, n_jobs=args.num_jobs)
-    logger.info('Stage 5: Processing sre_unlabelled embeddings...')
-    convert_embeddings(sre_unlabelled[:, 0], args.model_tag, split=UNLABELLED_SPLIT, save_loc=args.save,
-                       n_jobs=args.num_jobs)
-    logger.info('Stage 5: Processing sre_enroll embeddings...')
-    convert_embeddings(sre_enroll[:, 0], args.model_tag, split=ENROLL_SPLIT, save_loc=args.save, n_jobs=args.num_jobs)
-    logger.info('Stage 5: Processing sre_test embeddings...')
-    convert_embeddings(sre_test[:, 0], args.model_tag, split=TEST_SPLIT, save_loc=args.save, n_jobs=args.num_jobs)
-    logger.end_timer('Stage 5:')
-
-if args.stage <= 6:
-    logger.start_timer('Stage 6: PLDA Training.')
-    plda = PLDA(model_tag=args.model_tag, save_loc=args.save)
-    plda.fit(train_data[:, 0], train_data[:, 3])
-    logger.end_timer('Stage 6:')
-
-if args.stage <= 7:
-    logger.start_timer('Stage 7: PLDA Scoring.')
-    plda = PLDA(model_tag=args.model_tag, save_loc=args.save)
-    eer = plda.compute_eer(sre_enroll[:, 0], sre_enroll[:, 3], test_split=TEST_SPLIT)
-    logger.info('Net EER: {}'.format(eer))
-    logger.end_timer('Stage 7:')

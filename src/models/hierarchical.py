@@ -7,20 +7,17 @@ import json
 
 from constants.app_constants import EMB_DIR, LATEST_MODEL_FILE, MODELS_DIR
 from models.layers.attention import variable_attention
-from services.common import make_directory, save_batch_array, tensorflow_debug, use_gpu, split_args_list
-from services.loader import SplitBatchLoader, FixedBatchLoader
+from services.common import make_directory, save_batch_array, split_args_list
+from services.loader import SplitBatchLoader, ExtractLoader, FixedBatchLoader
 from services.logger import Logger
-
-tensorflow_debug(False)
-use_gpu(0)
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
 HOP = 10
-LAYER_1_HIDDEN_UNITS = 512
+LAYER_1_HIDDEN_UNITS = 256
 LAYER_2_HIDDEN_UNITS = 512
-LAYER_3_HIDDEN_UNITS = 512
+LAYER_3_HIDDEN_UNITS = 1024
 ATTENTION_SIZE = 256
 EMBEDDING_SIZE = 512
 DENSE_SIZE = 512
@@ -46,7 +43,8 @@ class HGRUModel:
         input_ = tf.reshape(input_, [-1, HOP, n_features])
 
         with tf.variable_scope('layer_1'):
-            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_1_HIDDEN_UNITS), input_, dtype=tf.float32)
+            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_1_HIDDEN_UNITS, activation=tf.nn.relu),
+                                              input_, dtype=tf.float32)
             if attention:
                 rnn_output = variable_attention(rnn_output, size=ATTENTION_SIZE)
             else:
@@ -54,8 +52,8 @@ class HGRUModel:
             rnn_output = tf.reshape(rnn_output, [-1, HOP, LAYER_1_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_2'):
-            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_2_HIDDEN_UNITS), rnn_output,
-                                              dtype=tf.float32)
+            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_2_HIDDEN_UNITS, activation=tf.nn.relu),
+                                              rnn_output, dtype=tf.float32)
             if attention:
                 rnn_output = variable_attention(rnn_output, size=ATTENTION_SIZE)
             else:
@@ -63,8 +61,8 @@ class HGRUModel:
             rnn_output = tf.reshape(rnn_output, [self.batch_size, -1, LAYER_2_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_3'):
-            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_3_HIDDEN_UNITS), rnn_output,
-                                              dtype=tf.float32)
+            rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_3_HIDDEN_UNITS, activation=tf.nn.relu),
+                                              rnn_output, dtype=tf.float32)
             if attention:
                 rnn_output = variable_attention(rnn_output, size=ATTENTION_SIZE)
             else:
@@ -93,7 +91,7 @@ class HGRUModel:
         make_directory(embedding_loc)
 
         # To enable proper reshaping in the 2 layers.
-        batch_loader = FixedBatchLoader(args_list, self.n_features, batch_size, 10000, self.model_tag, HOP**2, False, save_loc)
+        batch_loader = ExtractLoader(args_list, self.n_features, batch_size, 10000, self.model_tag, HOP**2, False, save_loc)
         saver = tf.train.Saver()
         with tf.Session(config=config) as sess:
             print('{}: Restoring Model...'.format(self.model_tag))
@@ -104,7 +102,7 @@ class HGRUModel:
                 print('{}: Extracting Batch {:d} embeddings...'.format(self.model_tag, b + 1))
                 embeddings = sess.run(self.embeddings, feed_dict={
                     self.input_: batch_x,
-                    self.batch_size: batch_loader.get_batch_size()
+                    self.batch_size: batch_x.shape[0]
                 })
                 save_batch_array(embedding_loc, args_idx, embeddings, ext='.npy')
                 print('{}: Saved Batch {:d} embeddings at: {}'.format(self.model_tag, b + 1, embedding_loc))
@@ -127,6 +125,7 @@ class HGRUModel:
                 saver.restore(sess, model_path)
                 ne = model_json['e']
                 nb = model_json['b']
+                batch_loader.set_current_batch(nb)
             else:
                 ne = 0
                 nb = 0

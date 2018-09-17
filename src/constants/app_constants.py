@@ -21,16 +21,19 @@ TEST_SPLIT = 'test'
 LATEST_MODEL_FILE = 'latest.json'
 
 DATA_SCP_FILE = join_path(DATA_DIR, 'data.scp')
+SPK_EMB_SCP_FILE = join_path(DATA_DIR, 'spk_xvector.scp')
 EMB_SCP_FILE = join_path(DATA_DIR, 'embeddings.scp')
 FEATS_SCP_FILE = join_path(MFCC_DIR, 'feats.scp')
 UTT2NUM_FRAMES_FILE = join_path(MFCC_DIR, 'utt2num_frames')
 VAD_SCP_FILE = join_path(VAD_DIR, 'vad.scp')
-TMP_SCP_FILE = join_path(TMP_DIR, 'tmp.scp')
+TMP_SCP_FILE = join_path(TMP_DIR, 'tmp_{}.scp')
 
 NUM_UTT_FILE = join_path(DATA_DIR, 'num_utt')
 SPK_UTT_FILE = join_path(DATA_DIR, 'spk2utt')
 TRIALS_FILE = join_path(DATA_DIR, 'trials')
 UTT_SPK_FILE = join_path(DATA_DIR, 'utt2spk')
+
+BATCH_LOADER_FILE = join_path(TMP_DIR, 'batch_loader_{}.pkl')
 
 SCORES_FILE = 'score.txt'
 EER_INPUT_FILE = 'eer_input.txt'

@@ -174,6 +174,23 @@ def get_kaldi_ark(args):
     return write_vector(vector, args[0], args[2])
 
 
+def make_labels_to_index_dict(index_list, label_list):
+    index_list = np.array(index_list)
+    label_list = np.array(label_list)
+    idx = np.argsort(label_list)
+    index_list = index_list[idx]
+    label_list = label_list[idx]
+    label_to_index_dict = dict()
+    for i, l in zip(index_list, label_list):
+        try:
+            idx = label_to_index_dict[l]
+        except KeyError:
+            idx = []
+        idx.append(i)
+        label_to_index_dict[l] = idx
+    return label_to_index_dict
+
+
 def make_num_utterance(speaker_list, num_utt_file):
     speaker_counter = Counter(speaker_list)
     with open(num_utt_file, 'w') as f:
@@ -222,15 +239,23 @@ def read_feats(scp_file, n_features, print_error=False):
     for i, feature in enumerate(features):
         feature = re.split('\[', feature)
         utt_id = feature[0][:-1]
-        feature = np.fromstring(feature[1][1:-2], dtype=float, sep=' \n').reshape([-1, n_features]).T
+        feature = np.fromstring(feature[1][1:-1], dtype=float, sep=' \n').reshape([-1, n_features]).T
         utt_list.append(utt_id)
         feature_list.append(feature)
     return utt_list, feature_list
 
 
-def read_vectors(scp_file, dtype=np.float):
-    vectors = Kaldi().run_command('copy-vector scp:{} ark,t:'.format(scp_file))
-    vectors = re.split('\n', vectors)[:-1]
+def read_vector(scp_file, dtype=np.float, print_error=False):
+    vector = Kaldi().run_command('copy-vector scp:{} ark,t:'.format(scp_file), print_error=print_error)
+    vector = re.split('\[', vector)
+    utt, vector = vector[0], vector[1][:-2]
+    vector = np.fromstring(vector, dtype, sep=' ')
+    return utt, vector
+
+
+def read_vectors(scp_file, dtype=np.float, print_error=False):
+    vectors = Kaldi().run_command('copy-vector scp:{} ark,t:'.format(scp_file), print_error=print_error)
+    vectors = re.split('\]', vectors)[:-1]
     utt_list = []
     vector_list = []
     for vector in vectors:
