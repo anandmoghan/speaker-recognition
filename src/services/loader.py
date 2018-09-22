@@ -18,7 +18,7 @@ class BatchLoader:
         self.multiple = multiple
         self.shuffle = shuffle
 
-        idx = np.argsort(args_list[:, -1])
+        idx = np.argsort(np.array(args_list[:, -1], dtype=int))
         self.index_list = np.array(args_list[idx, 0])
         self.frames = np.array(args_list[idx, -1], dtype=int)
         self.labels = np.array(args_list[idx, 3])
@@ -111,7 +111,7 @@ class FixedBatchLoader(BatchLoader):
 class SplitBatchLoader:
     def __init__(self, args_list, n_features, batch_size, splits, model_tag, multiple=1, shuffle=True,
                  save_loc='../save'):
-        idx = np.argsort(args_list[:, -1])
+        idx = np.argsort(np.array(args_list[:, -1], dtype=int))
         frames = np.array(args_list[idx, -1], dtype=int)
 
         start = 0

@@ -2,7 +2,7 @@
 
 cd $PWD/kaldi
 
-cmd=queue.pl
+cmd="perl queue.pl"
 nj=4
 vad_loc="./vad"
 vad_config="./vad/vad.conf"
