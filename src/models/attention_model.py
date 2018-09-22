@@ -9,7 +9,7 @@ import json
 from constants.app_constants import MODELS_DIR, LATEST_MODEL_FILE
 from models.layers.attention import supervised_attention
 from services.common import make_directory
-from services.loader import AttentionBatchLoader
+from services.loader import AttentionBatchLoader, LabelExtractLoader
 from services.logger import Logger
 
 config = tf.ConfigProto()
@@ -28,7 +28,7 @@ EMBEDDING_SIZE = 512
 logger = Logger()
 logger.set_config(filename='../logs/run-model.log', append=True)
 
-MODEL_TAG = 'HGRUModel'
+MODEL_TAG = 'ATTN_MODEL'
 
 
 class AttentionModel:
@@ -79,13 +79,14 @@ class AttentionModel:
         self.loss = tf.losses.sparse_softmax_cross_entropy(self.labels, self.logits)
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
 
-    def start_train(self, args_list, idx_to_label, epochs, lr, decay, batch_size, save_loc, cont=False):
+    def start_train(self, args_list, epochs, lr, decay, batch_size, save_loc, cont=False):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), self.model_tag)
         make_directory(model_loc)
         save_json = join_path(model_loc, LATEST_MODEL_FILE)
 
-        batch_loader = AttentionBatchLoader(args_list, idx_to_label, self.n_features, batch_size, 300, 500,
-                                            self.model_tag, 10, HOP ** 2, True, cont, save_loc)
+        batch_loader = AttentionBatchLoader(args_list=args_list, n_features=self.n_features, batch_size=batch_size,
+                                            min_frames=300, max_frames=500, model_tag=self.model_tag, num_repeats=10,
+                                            multiple=HOP ** 2, shuffle=True, save_loc=save_loc)
         dev_loader = batch_loader.get_dev_loader()
 
         logger.info('{}: Starting training session...'.format(self.model_tag))
@@ -108,6 +109,7 @@ class AttentionModel:
                 saver.restore(sess, model_path)
                 ne = model_json['e']
                 nb = model_json['b'] + 1
+                batch_loader.set_current_batch(nb)
 
             for e in range(ne, epochs):
                 current_lr = lr * (decay ** e)
@@ -123,7 +125,8 @@ class AttentionModel:
                     })
                     accuracy = 100 * accuracy_score(predicted_labels, batch_y)
                     end_time = get_time()
-                    logger.info('{}: Epoch {:d} | Batch {:d}/{:d} | Loss: {:.3f} | Accuracy: {:0.2f}% | Time Elapsed: {:d} seconds'
+                    logger.info(
+                        '{}: Epoch {:d} | Batch {:d}/{:d} | Loss: {:.3f} | Accuracy: {:0.2f}% | Time Elapsed: {:d} seconds'
                         .format(self.model_tag, e + 1, b + 1, n_batches, loss, accuracy, int(end_time - start_time)))
                     if (e * n_batches + b + 1) % 100 == 0:
                         logger.info('{}: Calculating Dev Loss for {} dev batches...'
@@ -145,7 +148,7 @@ class AttentionModel:
                         dev_accuracy = 100 * dev_accuracy / dev_loader.total_batches()
                         end_time = get_time()
                         logger.info('{}: Development Set | Epoch {:d} | Batch {:d} | Loss: {:.3f} | Accuracy: {:.2f}% | Time Elapsed: {:d} seconds'
-                            .format(self.model_tag, e + 1, b + 1, dev_loss, dev_accuracy, int(end_time - start_time)))
+                                    .format(self.model_tag, e + 1, b + 1, dev_loss, dev_accuracy, int(end_time - start_time)))
 
                         idx = np.argmax(min_dev_loss)
                         if dev_loss <= min_dev_loss[idx]:
@@ -164,4 +167,35 @@ class AttentionModel:
                                         .format(self.model_tag, e + 1, b + 1, dev_loss))
                             min_dev_loss[idx] = dev_loss
                 nb = 0
-        return self.n_classes
+
+    def evaluate(self, trials_file, test_list, batch_size, save_loc='../save'):
+        model_loc = join_path(join_path(save_loc, MODELS_DIR), self.model_tag)
+        save_json = join_path(model_loc, LATEST_MODEL_FILE)
+        with open(save_json, 'r') as f:
+            model_json = json.load(f)
+        model_path = join_path(model_loc, '{}_Epoch{:d}_Batch{:d}_Loss{:.2f}.ckpt'
+                               .format(self.model_tag, model_json['e'] + 1, model_json['b'] + 1, model_json['loss']))
+
+        extract_loader = LabelExtractLoader(trials_file, test_list, self.n_features, batch_size, self.model_tag,
+                                            multiple=HOP ** 2, save_loc=save_loc)
+        saver = tf.train.Saver()
+        with tf.Session(config=config) as sess:
+            print('{}: Restoring Model...'.format(self.model_tag))
+            saver.restore(sess, model_path)
+            total_accuracy = 0
+            n_batches = extract_loader.total_batches()
+            for b in range(n_batches):
+                start_time = get_time()
+                batch_x, batch_y, context_vector = extract_loader.next()
+                loss, predicted_labels = sess.run([self.loss, self.predicted_labels], feed_dict={
+                    self.input_: batch_x,
+                    self.labels: batch_y,
+                    self.context_vector: context_vector,
+                    self.batch_size: batch_x.shape[0]
+                })
+                accuracy = accuracy_score(batch_y, predicted_labels)
+                total_accuracy = total_accuracy + accuracy * batch_x.shape[0]
+                end_time = get_time()
+                logger.info('{}: Batch {}/{} | Loss: {:.3f} | Accuracy: {:.2f}% | Time Elapsed: {:d} seconds'
+                            .format(self.model_tag, b + 1, n_batches, loss, accuracy * 100, int(end_time - start_time)))
+            logger.info('{}: Total Accuracy: {:.2f}%'.format(self.model_tag, total_accuracy * 100 / extract_loader.total_trials()))

@@ -3,9 +3,11 @@ from os.path import join as join_path
 
 import numpy as np
 
-from constants.app_constants import FEATS_SCP_FILE, TMP_SCP_FILE, BATCH_LOADER_FILE, SPK_EMB_SCP_FILE
-from services.common import get_index_array, load_object, split_dict
-from services.kaldi import spaced_file_to_dict, read_feats, make_labels_to_index_dict, read_vectors, read_vector
+from constants.app_constants import FEATS_SCP_FILE, TMP_SCP_FILE, SPK_EMB_SCP_FILE, \
+    ENROLL_SPK_EMB_SCP_FILE
+from services.common import get_index_array, split_dict, make_dict
+from services.kaldi import spaced_file_to_dict, read_feats, make_labels_to_index_dict, read_vector
+from services.sre_data import split_trials_file
 
 
 class BatchLoader:
@@ -178,11 +180,11 @@ class ExtractLoader(FixedBatchLoader):
 
 
 class LabelBatchLoader:
-    def __init__(self, args_list, label_to_index_list, idx_to_label, n_features, batch_size, min_frames, max_frames,
+    def __init__(self, args_list, label_to_index_list, n_features, batch_size, min_frames, max_frames,
                  model_tag, multiple=1, shuffle=True, save_loc='../save'):
-        self.index_list = args_list[:, 0]
-        self.duration_list = args_list[:, 1]
-        self.labels = args_list[:, 2]
+        self.index_list = np.array(args_list[:, 0])
+        self.duration_list = np.array(args_list[:, 1], dtype=int)
+        self.labels = np.array(args_list[:, 2])
         self.n_features = n_features
         self.batch_size = batch_size
         self.half_batch_size = int(batch_size / 2)
@@ -191,12 +193,11 @@ class LabelBatchLoader:
         self.max_frames = max_frames
         self.shuffle = shuffle
         self.model_tag = model_tag
-        self.idx_to_label = idx_to_label
         self.label_to_index_list = label_to_index_list
 
         labels = np.array(list(label_to_index_list.keys()))
-        self.counts = np.array([len(label_to_index_list[key]) for key in labels])
-        self.main_labels = labels[self.counts >= self.half_batch_size]
+        counts = np.array([len(label_to_index_list[key]) for key in labels])
+        self.main_labels = labels[counts >= self.half_batch_size]
         if shuffle:
             np.random.shuffle(self.main_labels)
 
@@ -232,11 +233,10 @@ class LabelBatchLoader:
             idx = idx[np.random.choice(len(idx), self.half_batch_size, replace=False)]
             count = 0
             while count < self.half_batch_size:
-                i = np.random.randint(self.n_batches)
-                other_label = self.main_labels[i]
+                other_label = self.main_labels[np.random.randint(self.n_batches)]
                 if other_label != label:
                     other_idx = np.array(self.label_to_index_list[other_label])
-                    other_idx = other_idx[np.random.choice(len(other_idx), 1, replace=False)]
+                    other_idx = other_idx[np.random.randint(len(other_idx))]
                     idx = np.append(idx, other_idx)
                     count = count + 1
             batch_splits.append(idx)
@@ -244,32 +244,24 @@ class LabelBatchLoader:
 
     def next(self):
         current_batch_idx = self.batch_splits[self.batch_pointer]
-        index_list = np.array(self.index_list[current_batch_idx])
-        duration_list = np.array(self.duration_list[current_batch_idx])
-        labels = np.array(self.labels[current_batch_idx])
+        index_list = self.index_list[current_batch_idx]
+        duration_list = self.duration_list[current_batch_idx]
+        labels = self.labels[current_batch_idx]
         main_label = self.main_labels[self.batch_pointer]
         frame_len = self.frame_len[self.batch_pointer]
         self.increment_pointer()
 
         with open(self.tmp_scp_file, 'w') as f:
             for utt, start in zip(index_list, duration_list):
-                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], start, int(start) + frame_len - 1))
-
+                f.write('{} {}[{}:{}]\n'.format(utt, self.feats_dict[utt], start, start + frame_len - 1))
         _, np_features = read_feats(self.tmp_scp_file, self.n_features)
 
-        out_labels = []
-        for label in labels:
-            if label != main_label:
-                out_labels.append(0)
-            else:
-                out_labels.append(1)
-
-        main_label = self.idx_to_label[int(main_label)]
         with open(self.tmp_scp_file, 'w') as f:
             f.write('{} {}\n'.format(main_label, self.spk_emb_dict[main_label]))
-
         _, emb_vector = read_vector(self.tmp_scp_file, float)
-        return np.array(np_features), np.array(out_labels), np.array(emb_vector).reshape([1, -1])
+
+        out_labels = np.array([1 if label == main_label else 0 for label in labels])
+        return np.array(np_features), out_labels, np.array(emb_vector).reshape([1, -1])
 
     def reset(self):
         self.batch_pointer = 0
@@ -285,13 +277,88 @@ class LabelBatchLoader:
         return self.n_batches
 
 
+class LabelExtractLoader:
+    def __init__(self, trials_file, test_list, n_features, max_batch_size, model_tag, multiple=1, save_loc='../save'):
+        index_list, label_list, target_list = split_trials_file(trials_file)
+        self.index_list = np.array(index_list)
+        self.target_labels = np.array([1 if t == 'target' else 0 for t in target_list])
+        self.n_features = n_features
+        self.batch_size = max_batch_size
+        self.multiple = multiple
+        self.frames_dict = make_dict(test_list[:, 0], np.array(test_list[:, -1], dtype=int))
+
+        number_list = list(range(len(label_list)))
+        labels_to_index_dict = make_labels_to_index_dict(number_list, label_list)
+
+        self.batch_pointer = 0
+        self.main_labels = []
+        self.batch_splits = []
+        for label, values in labels_to_index_dict.items():
+            n_batches = int(len(values) / self.batch_size) + (0 if len(values) % self.batch_size == 0 else 1)
+            self.main_labels = self.main_labels + [label] * n_batches
+            frames = np.array([self.frames_dict[self.index_list[val]] for val in values], dtype=int)
+            idx = np.argsort(frames)
+            self.batch_splits = self.batch_splits + np.array_split(np.array(values)[idx], n_batches)
+        self.n_batches = len(self.main_labels)
+
+        self.feats_dict = spaced_file_to_dict(join_path(save_loc, FEATS_SCP_FILE))
+        self.spk_emb_dict = spaced_file_to_dict(join_path(save_loc, ENROLL_SPK_EMB_SCP_FILE))
+        self.tmp_scp_file = join_path(save_loc, TMP_SCP_FILE.format(model_tag))
+        self.scores = np.zeros([1, len(label_list)])
+
+    def get_batch_size(self):
+        return self.batch_size
+
+    def get_current_batch(self):
+        return self.batch_pointer
+
+    def increment_pointer(self):
+        self.batch_pointer = self.batch_pointer + 1
+        if self.batch_pointer == self.n_batches:
+            self.reset()
+
+    def next(self):
+        current_batch_idx = self.batch_splits[self.batch_pointer]
+        index_list = np.array(self.index_list[current_batch_idx])
+        main_label = self.main_labels[self.batch_pointer]
+        frames = [self.frames_dict[key] for key in index_list]
+        self.batch_size = len(current_batch_idx)
+        self.increment_pointer()
+
+        max_len = int(min(frames) / self.multiple) * self.multiple
+        with open(self.tmp_scp_file, 'w') as f:
+            for utt in index_list:
+                f.write('{} {}[0:{}]\n'.format(utt, self.feats_dict[utt], max_len - 1))
+
+        _, np_features = read_feats(self.tmp_scp_file, self.n_features)
+
+        with open(self.tmp_scp_file, 'w') as f:
+            f.write('{} {}\n'.format(main_label, self.spk_emb_dict[main_label]))
+
+        _, emb_vector = read_vector(self.tmp_scp_file, float)
+
+        out_labels = np.array(self.target_labels[current_batch_idx])
+        return np.array(np_features), out_labels, np.array(emb_vector).reshape([1, -1])
+
+    def reset(self):
+        self.batch_pointer = 0
+
+    def set_current_batch(self, value):
+        self.batch_pointer = value
+
+    def total_batches(self):
+        return self.n_batches
+
+    def total_trials(self):
+        return len(self.index_list)
+
+
 class AttentionBatchLoader:
-    def __init__(self, args_list, idx_to_label, n_features, batch_size, min_frames, max_frames, model_tag,
-                 num_repeats=10, multiple=1, shuffle=True, cont=False, save_loc='../save'):
+    def __init__(self, args_list, n_features, batch_size, min_frames, max_frames, model_tag,
+                 num_repeats=10, multiple=1, shuffle=True, save_loc='../save'):
         self.n_features = n_features
         self.min_frames = min_frames
         self.max_frames = max_frames
-        self.idx_to_label = idx_to_label
 
         index_list = args_list[:, 0]
         frames = np.array(args_list[:, -1], dtype=int)
@@ -340,10 +407,10 @@ class AttentionBatchLoader:
         split_args_list = np.vstack([split_index_list, split_duration_list, split_labels]).T
 
         print('{}: Preparing Train Batch Loader...'.format(model_tag))
-        self.train_loader = LabelBatchLoader(split_args_list, train_label_index_dict, idx_to_label, n_features, batch_size, min_frames,
+        self.train_loader = LabelBatchLoader(split_args_list, train_label_index_dict, n_features, batch_size, min_frames,
                                              max_frames, model_tag, multiple, shuffle, save_loc)
         print('{}: Preparing Dev Batch Loader...'.format(model_tag))
-        self.dev_loader = LabelBatchLoader(split_args_list, dev_label_index_dict, idx_to_label, n_features, batch_size, min_frames,
+        self.dev_loader = LabelBatchLoader(split_args_list, dev_label_index_dict, n_features, batch_size, min_frames,
                                            max_frames, model_tag, multiple, False, save_loc)
 
     def get_batch_size(self):

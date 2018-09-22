@@ -526,6 +526,15 @@ def make_sre16_trials_file(sre_config, trials_file):
         for trial in trials_list:
             f.write('{}\n'.format(trial))
 
-    # with open(trials_file, 'w') as f:
-    #     for (i, s, t) in zip(index_list, speaker_list, target_list):
-    #         f.write('{} {} {}\n'.format(s, i, t))
+
+def split_trials_file(trials_file):
+    index_list = []
+    label_list = []
+    target_list = []
+    with open(trials_file) as f:
+        for line in f.readlines():
+            tokens = re.split('[\s]+', line.strip())
+            index_list.append(tokens[1])
+            label_list.append(tokens[0])
+            target_list.append(tokens[2])
+    return index_list, label_list, target_list

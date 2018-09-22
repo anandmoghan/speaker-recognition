@@ -13,8 +13,10 @@ from services.checks import check_mfcc, check_embeddings
 from services.common import create_directories, load_object, save_object, tensorflow_debug, use_gpu
 from services.feature import MFCC, generate_data_scp, get_mfcc_frames, remove_bad_files
 from services.kaldi import PLDA, convert_embeddings
+from services.loader import LabelExtractLoader
 from services.logger import Logger
-from services.sre_data import get_train_data, make_sre16_eval_data, make_sre16_unlabelled_data, make_sre16_trials_file
+from services.sre_data import get_train_data, make_sre16_eval_data, make_sre16_unlabelled_data, make_sre16_trials_file, \
+    split_trials_file
 
 DATA_CONFIG = '../configs/sre_data.json'
 
@@ -118,25 +120,25 @@ elif args.stage < 5 and not args.skip_check:
             frames = get_mfcc_frames(args.save, train_data[:, 0])
             logger.info('Check: Appending and saving...')
             train_data = np.hstack([train_data, frames])
-            save_object(join_path(args.save, 'train_data.pkl'), train_data)
+            save_object(join_path(data_loc, 'train_data.pkl'), train_data)
         if sre_unlabelled.shape[1] < 6:
             logger.info('Check: Fetching sre_unlabelled frames counts...')
             frames = get_mfcc_frames(args.save, sre_unlabelled[:, 0])
             logger.info('Check: Appending and saving...')
             sre_unlabelled = np.hstack([sre_unlabelled, frames])
-            save_object(join_path(args.save, 'sre_unlabelled.pkl'), sre_unlabelled)
+            save_object(join_path(data_loc, 'sre_unlabelled.pkl'), sre_unlabelled)
         if sre_enroll.shape[1] < 6:
             logger.info('Check: Fetching sre_enroll frames counts...')
             frames = get_mfcc_frames(args.save, sre_enroll[:, 0])
             logger.info('Check: Appending and saving...')
             sre_enroll = np.hstack([sre_enroll, frames])
-            save_object(join_path(args.save, 'sre_enroll.pkl'), sre_enroll)
-        if sre_test.shape[1] < 8:
+            save_object(join_path(data_loc, 'sre_enroll.pkl'), sre_enroll)
+        if sre_test.shape[1] < 7:
             logger.info('Check: Fetching sre_test frames counts...')
             frames = get_mfcc_frames(args.save, sre_test[:, 0])
             logger.info('Check: Appending and saving...')
             sre_test = np.hstack([sre_test, frames])
-            save_object(join_path(args.save, 'sre_test.pkl'), sre_test)
+            save_object(join_path(data_loc, 'sre_test.pkl'), sre_test)
     logger.end_timer('Check:')
 
 if args.stage <= 2:
@@ -160,32 +162,16 @@ if args.stage <= 2:
     logger.info('Stage 2: Training Utterances after filtering: {:d}'.format(train_data.shape[0]))
     save_object(join_path(data_loc, 'train_data.pkl'), train_data)
 
-    logger.info('Stage 2: Making Speaker dictionaries...')
-    n_speakers = len(unique_speakers)
-    speaker_to_idx = dict(zip(unique_speakers, range(n_speakers)))
-    idx_to_speaker = dict(zip(range(n_speakers), unique_speakers))
-    train_data[:, 3] = np.array([speaker_to_idx[s] for s in speakers])
-    save_object(join_path(args.save, 'speaker_to_idx.pkl'), speaker_to_idx)
-    save_object(join_path(args.save, 'idx_to_speaker.pkl'), idx_to_speaker)
-    logger.end_timer('Stage 2:')
-else:
-    logger.start_timer('Load: Loading speaker dictionaries...')
-    speaker_to_idx = load_object(join_path(args.save, 'speaker_to_idx.pkl'))
-    idx_to_speaker = load_object(join_path(args.save, 'idx_to_speaker.pkl'))
-    speakers = train_data[:, 3]
-    train_data[:, 3] = [speaker_to_idx[s] for s in speakers]
-    logger.end_timer('Load:')
-
 if args.stage <= 4:
-    # model = XVectorModel(n_features=args.num_features, n_classes=n_speakers, attention=False, model_tag=args.model_tag)
     model = AttentionModel(n_features=args.num_features, n_classes=2, model_tag=args.model_tag)
     if args.stage <= 3:
         logger.start_timer('Stage 3: Train Neural Net.')
-        model.start_train(args_list=train_data, idx_to_label=idx_to_speaker, epochs=args.epochs, lr=args.lr,
+        model.start_train(args_list=train_data, epochs=args.epochs, lr=args.lr,
                           decay=args.decay, batch_size=args.batch_size, save_loc=args.save, cont=args.cont)
         logger.end_timer('Stage 3:')
 
     logger.start_timer('Stage 4: Scoring.')
-    logger.info('Stage 4: Processing train_data...')
-
+    logger.info('Stage 4: Evaluating..')
+    trials_file = join_path(args.save, TRIALS_FILE)
+    model.evaluate(trials_file, sre_test, args.batch_size, save_loc=args.save)
     logger.end_timer('Stage 4:')

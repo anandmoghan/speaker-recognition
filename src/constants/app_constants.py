@@ -23,6 +23,7 @@ LATEST_MODEL_FILE = 'latest.json'
 DATA_SCP_FILE = join_path(DATA_DIR, 'data.scp')
 SPK_EMB_SCP_FILE = join_path(DATA_DIR, 'spk_xvector.scp')
 EMB_SCP_FILE = join_path(DATA_DIR, 'embeddings.scp')
+ENROLL_SPK_EMB_SCP_FILE = join_path(DATA_DIR, 'enroll_spk_xvector.scp')
 FEATS_SCP_FILE = join_path(MFCC_DIR, 'feats.scp')
 UTT2NUM_FRAMES_FILE = join_path(MFCC_DIR, 'utt2num_frames')
 VAD_SCP_FILE = join_path(VAD_DIR, 'vad.scp')

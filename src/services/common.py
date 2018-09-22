@@ -88,6 +88,8 @@ def make_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
+def make_dict(key_list, value_list):
+    return dict([(key, value) for key, value in zip(key_list, value_list)])
 
 def put_time_stamp(text):
     return time.strftime(' %b %d, %Y %l:%M:%S%p - ') + text
