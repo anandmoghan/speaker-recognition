@@ -8,6 +8,7 @@ parser.add_argument('--splits', type=int, default=20, help='No of Splits')
 parser.add_argument('--file', type=str, help='SCP File')
 parser.add_argument('--prefix', type=str, help='Prefix for split files.')
 parser.add_argument('--dest', type=str, help='Destination')
+parser.add_argument('--ext', type=str, default='scp', help='Destination')
 args = parser.parse_args()
 
 with open(args.file, 'r') as f:
@@ -15,6 +16,6 @@ with open(args.file, 'r') as f:
 
 idx = np.array_split(np.arange(0, len(lines), dtype=int), args.splits)
 for i in range(args.splits):
-    file_name = join_path(args.dest, '{}.{}.scp'.format(args.prefix, i+1))
+    file_name = join_path(args.dest, '{}.{}.{}'.format(args.prefix, i+1, args.ext))
     with open(file_name, 'w') as f:
         f.writelines(lines[idx[i]])

@@ -13,7 +13,7 @@ from services.common import create_directories, load_object, save_object, tensor
 from services.feature import MFCC, generate_data_scp, get_mfcc_frames, remove_bad_files
 from services.kaldi import PLDA, convert_embeddings
 from services.logger import Logger
-from services.sre_data import get_train_data, make_sre16_eval_data, make_sre16_unlabelled_data, make_sre16_trials_file
+from services.sre_data import get_train_data, make_sre16_eval_data, make_sre18_unlabelled_data, make_sre16_trials_file
 
 DATA_CONFIG = '../configs/sre_data.json'
 
@@ -48,7 +48,7 @@ if args.stage <= 0:
     logger.start_timer('Stage 0: Making data...')
     train_data = get_train_data(DATA_CONFIG)
     logger.info('Stage 0: Made {:d} files for training.'.format(train_data.shape[0]))
-    sre_unlabelled = make_sre16_unlabelled_data(DATA_CONFIG)
+    sre_unlabelled = make_sre18_unlabelled_data(DATA_CONFIG)
     logger.info('Stage 0: Made {:d} unlabelled files.'.format(sre_unlabelled.shape[0]))
     sre_enroll, sre_test = make_sre16_eval_data(DATA_CONFIG)
     logger.info('Stage 0: Saving data lists..')

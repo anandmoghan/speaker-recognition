@@ -15,7 +15,10 @@
     "SWBD_P3": "SRE2018/LDC2018E48_Comprehensive_Switchboard/LDC2002S06",
     "MX6": "SRE2018/mx6_speech",
     "SRE16_EVAL": "SRE16/R149_0_1",
-    "SRE16_UNLABELED": "SRE16/Call_My_Net_Training_Data"
+    "SRE16_UNLABELED": "SRE16/Call_My_Net_Training_Data",
+    "SRE18_UNLABELED": "SRE16/Call_My_Net_Training_Data",
+    "SRE18_DEV": "SRE2018/LDC2018E46_2018_NIST_Speaker_Recognition_Evaluation_Development_Set",
+    "SRE18_EVAL": "SRE2018/LDC2018E51"
   },
   "SPEAKER_KEY": "../configs/speaker_list"
 }

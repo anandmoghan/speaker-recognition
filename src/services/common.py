@@ -4,6 +4,7 @@ from subprocess import Popen, PIPE
 from tqdm import tqdm
 from os.path import join as join_path
 
+
 import multiprocessing as mp
 import numpy as np
 import os
@@ -57,12 +58,15 @@ def get_file_list(location, pattern='*.sph'):
     return file_list
 
 
-def get_file_list_as_dict(location, pattern='*.sph'):
+def get_file_list_as_dict(location, pattern='*.sph', ext=False):
     file_list = dict()
     for path, _, files in os.walk(location):
         for name in files:
             if fnmatch(name, pattern):
-                file_list[name[:-len(pattern)+1]] = os.path.join(path, name)
+                key = name
+                if not ext:
+                    key = key[:-len(pattern)+1]
+                file_list[key] = os.path.join(path, name)
     if len(file_list) == 0:
         raise Warning('No {} files in {}'.format(pattern, location))
     return file_list
@@ -88,8 +92,10 @@ def make_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
+
 def make_dict(key_list, value_list):
     return dict([(key, value) for key, value in zip(key_list, value_list)])
+
 
 def put_time_stamp(text):
     return time.strftime(' %b %d, %Y %l:%M:%S%p - ') + text

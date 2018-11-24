@@ -35,22 +35,23 @@ class MFCC:
         self.n_ceps = n_ceps
         self.n_jobs = n_jobs
 
-    def extract(self, data_scp):
-        return Kaldi().run_command('sh ./kaldi/make_mfcc.sh {} {}'.format(data_scp, self.params_file))
+    def extract(self, data_loc, split):
+        return Kaldi().run_command('sh ./kaldi/make_mfcc.sh {} {} {}'.format(data_loc, split, self.params_file), print_error=True)
 
-    def extract_with_vad_and_normalization(self, data_scp, threshold=5.5, mean_scale=0.5, cmvn_window=300, var_norm=False):
+    def extract_with_vad_and_normalization(self, data_loc, split, threshold=5.5, mean_scale=0.5, cmvn_window=300,
+                                           var_norm=False):
         vad_loc = join_path(self.save_loc, VAD_DIR)
         tmp_loc = join_path(self.save_loc, TMP_DIR)
 
-        feats_scp = join_path(self.save_loc, FEATS_SCP_FILE)
-        vad_scp = join_path(self.save_loc, VAD_SCP_FILE)
+        feats_scp = join_path(data_loc, FEATS_SCP_FILE)
+        vad_scp = join_path(data_loc, VAD_SCP_FILE)
 
         print('MFCC: Extracting features...')
-        self.extract(data_scp)
+        self.extract(data_loc, split)
 
         print('MFCC: Computing VAD...')
         vad = VAD(threshold, mean_scale, n_jobs=self.n_jobs, save_loc=self.save_loc)
-        vad.compute(feats_scp)
+        vad.compute(data_loc, split)
 
         print('MFCC: Normalizing features and selecting voiced frames..')
         feats_scp_dict = spaced_file_to_dict(feats_scp)
@@ -69,18 +70,21 @@ class MFCC:
         Kaldi().queue('JOB=1:{nj} {mfcc_loc}/log/voiced_feats.JOB.log '
                       'apply-cmvn-sliding --norm-vars={var_norm} --center=true --cmn-window={window} scp:{tmp_loc}/feats.JOB.scp ark:- \| '
                       'select-voiced-frames ark:- scp,ns,cs:{tmp_loc}/vad.JOB.scp ark:- \| '
-                      'copy-feats --compress=false --write-num-frames=ark,t:{mfcc_loc}/log/utt2num_frames.JOB ark:- '
-                      'ark,scp:{mfcc_loc}/voiced_feats.JOB.ark,{mfcc_loc}/voiced_feats.JOB.scp || exit 1;'
-                      .format(mfcc_loc=self.mfcc_loc, tmp_loc=tmp_loc, vad_loc=vad_loc, var_norm='true' if var_norm else 'false',
-                              nj=self.n_jobs, window=cmvn_window))
+                      'copy-feats --compress=true --write-num-frames=ark,t:{mfcc_loc}/log/utt2num_frames.{name}.JOB ark:- '
+                      'ark,scp:{mfcc_loc}/voiced_feats.{name}.JOB.ark,{mfcc_loc}/voiced_feats.{name}.JOB.scp || exit 1;'
+                      .format(mfcc_loc=self.mfcc_loc, tmp_loc=tmp_loc, vad_loc=vad_loc,
+                              var_norm='true' if var_norm else 'false',
+                              nj=self.n_jobs, window=cmvn_window, name=split))
 
         run_command('for n in $(seq {nj}); do \n'
-                    '   cat {mfcc_loc}/voiced_feats.$n.scp || exit 1;\n'
-                    'done > {mfcc_loc}/feats.scp || exit 1'.format(mfcc_loc=self.mfcc_loc, nj=self.n_jobs))
+                    '   cat {mfcc_loc}/voiced_feats.{name}.$n.scp || exit 1;\n'
+                    'done > {data_loc}/voiced_feats.scp || exit 1'.format(mfcc_loc=self.mfcc_loc, data_loc=data_loc,
+                                                                          nj=self.n_jobs, name=split))
 
         run_command('for n in $(seq {nj}); do \n'
-                    '   cat {mfcc_loc}/log/utt2num_frames.$n || exit 1;\n'
-                    'done > {mfcc_loc}/utt2num_frames || exit 1'.format(mfcc_loc=self.mfcc_loc, nj=self.n_jobs))
+                    '   cat {mfcc_loc}/log/utt2num_frames.{name}.$n || exit 1;\n'
+                    'done > {data_loc}/utt2num_frames || exit 1'.format(mfcc_loc=self.mfcc_loc, data_loc=data_loc,
+                                                                        nj=self.n_jobs, name=split))
 
 
 class VAD:
@@ -100,8 +104,8 @@ class VAD:
 
         self.params_file = params_file
 
-    def compute(self, feats_scp):
-        return Kaldi().run_command('sh ./kaldi/compute_vad.sh {} {}'.format(feats_scp, self.params_file))
+    def compute(self, data_loc, split):
+        return Kaldi().run_command('sh ./kaldi/compute_vad.sh {} {} {}'.format(data_loc, split, self.params_file))
 
 
 def add_frames_to_args(args_list, frame_dict):

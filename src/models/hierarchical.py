@@ -14,7 +14,8 @@ from services.logger import Logger
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
-HOP = 10
+HOP1 = 10
+HOP2 = 5
 LAYER_1_HIDDEN_UNITS = 256
 LAYER_2_HIDDEN_UNITS = 512
 LAYER_3_HIDDEN_UNITS = 1024
@@ -38,9 +39,13 @@ class HGRUModel:
         self.batch_size = tf.Variable(32, dtype=tf.int32, trainable=False)
         self.lr = tf.Variable(0.0, dtype=tf.float32, trainable=False)
 
+        net_hop = HOP1 * HOP2
+        max_frames = tf.cast(tf.floor(tf.shape(self.input_)[2] / net_hop), tf.int32) * net_hop
+        input_ = self.input_[:, :, :max_frames]
+
         # Sequence information in not important. So, to improve performance, every HOP frames are given parallel.
-        input_ = tf.transpose(self.input_, [0, 2, 1])
-        input_ = tf.reshape(input_, [-1, HOP, n_features])
+        input_ = tf.transpose(input_, [0, 2, 1])
+        input_ = tf.reshape(input_, [-1, HOP1, n_features])
 
         with tf.variable_scope('layer_1'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_1_HIDDEN_UNITS, activation=tf.nn.relu),
@@ -49,7 +54,7 @@ class HGRUModel:
                 rnn_output = variable_attention(rnn_output, size=ATTENTION_SIZE)
             else:
                 rnn_output = rnn_output[:, -1, :]
-            rnn_output = tf.reshape(rnn_output, [-1, HOP, LAYER_1_HIDDEN_UNITS])
+            rnn_output = tf.reshape(rnn_output, [-1, HOP2, LAYER_1_HIDDEN_UNITS])
 
         with tf.variable_scope('layer_2'):
             rnn_output, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(LAYER_2_HIDDEN_UNITS, activation=tf.nn.relu),
@@ -77,7 +82,8 @@ class HGRUModel:
 
         self.logits = tf.layers.dense(dense_output, n_classes, activation=None)
         self.loss = tf.losses.sparse_softmax_cross_entropy(self.labels, self.logits)
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
+        self.global_step = tf.train.get_or_create_global_step()
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss, global_step=self.global_step)
 
     def extract(self, args_list, batch_size, save_loc='../save'):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), self.model_tag)

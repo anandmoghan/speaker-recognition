@@ -7,8 +7,8 @@ import re
 
 from constants.app_constants import KALDI_QUEUE_FILE, KALDI_PATH_FILE, DATA_DIR, EMB_DIR, LOGS_DIR, PLDA_DIR, \
     EMB_SCP_FILE, SPK_UTT_FILE, UTT_SPK_FILE, TRAIN_SPLIT, ENROLL_SPLIT, TEST_SPLIT, NUM_UTT_FILE, SCORES_FILE, \
-    TRIALS_FILE, UNLABELLED_SPLIT, EER_INPUT_FILE
-from services.common import run_parallel, load_array
+    TRIALS_FILE, UNLABELLED_SPLIT, EER_INPUT_FILE, EGS_DIR
+from services.common import run_parallel, load_array, run_command, make_directory, sort_by_index
 
 
 class Kaldi:
@@ -174,6 +174,15 @@ def get_kaldi_ark(args):
     return write_vector(vector, args[0], args[2])
 
 
+def make_kaldi_data_dir(args_list, data_loc):
+    make_directory(data_loc)
+    # run_command('cd {} && mv * .backup/'.format(data_loc))
+    args_list = sort_by_index(args_list)
+    make_wav_scp(args_list[:, 0], args_list[:, 4], join_path(data_loc, 'wav.scp'))
+    make_spk_to_utt(args_list[:, 0], args_list[:, 3], join_path(data_loc, 'spk2utt'))
+    make_utt_to_spk(args_list[:, 0], args_list[:, 3], join_path(data_loc, 'utt2spk'))
+
+
 def make_labels_to_index_dict(index_list, label_list):
     index_list = np.array(index_list)
     label_list = np.array(label_list)
@@ -223,6 +232,36 @@ def make_utt_to_spk(index_list, speaker_list, utt_spk_file):
     with open(utt_spk_file, 'w') as f:
         for u, s in zip(index_list, speaker_list):
             f.write('{} {}\n'.format(u, s))
+
+
+def make_wav_scp(index_list, read_list, wav_scp):
+    with open(wav_scp, 'w') as f:
+        for i, r in zip(index_list, read_list):
+            f.write('{} {} |\n'.format(i, r))
+
+
+def parse_egs_scp(egs_id, save_loc='../save'):
+    egs_loc = join_path(save_loc, EGS_DIR)
+    egs_file = join_path(egs_loc, 'egs.{}.scp'.format(egs_id))
+
+    data = []
+    with open(egs_file) as f:
+        for line in f.readlines():
+            tokens = re.split('[\s]+', line.strip())
+            label = tokens[0].split('-')[-1]
+            data.append((tokens[0], tokens[1], label))
+    return data
+
+
+def read_egs(scp_file, n_features, print_error=False):
+    output = Kaldi().run_command('nnet3-copy-egs scp:{} ark,t:'.format(scp_file), print_error=print_error)
+    features = re.split('\]', output)[:-1]
+    feature_list = []
+    for i in range(0, len(features), 2):
+        feature = re.split('\[', features[i])[1]
+        feature = np.fromstring(feature, dtype=float, sep=' \n').reshape([-1, n_features]).T
+        feature_list.append(feature)
+    return np.array(feature_list)
 
 
 def read_feat(scp_file, n_features):

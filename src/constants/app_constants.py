@@ -5,6 +5,7 @@ KALDI_QUEUE_FILE = './kaldi/queue.pl'
 
 DATA_DIR = 'data'
 EMB_DIR = 'embeddings'
+EGS_DIR = 'egs'
 LOGS_DIR = 'logs'
 MFCC_DIR = 'mfcc'
 MODELS_DIR = 'models'
@@ -24,10 +25,11 @@ DATA_SCP_FILE = join_path(DATA_DIR, 'data.scp')
 SPK_EMB_SCP_FILE = join_path(DATA_DIR, 'spk_xvector.scp')
 EMB_SCP_FILE = join_path(DATA_DIR, 'embeddings.scp')
 ENROLL_SPK_EMB_SCP_FILE = join_path(DATA_DIR, 'enroll_spk_xvector.scp')
-FEATS_SCP_FILE = join_path(MFCC_DIR, 'feats.scp')
-UTT2NUM_FRAMES_FILE = join_path(MFCC_DIR, 'utt2num_frames')
-VAD_SCP_FILE = join_path(VAD_DIR, 'vad.scp')
 TMP_SCP_FILE = join_path(TMP_DIR, 'tmp_{}.scp')
+
+FEATS_SCP_FILE = 'feats.scp'
+UTT2NUM_FRAMES_FILE = 'utt2num_frames'
+VAD_SCP_FILE = 'vad.scp'
 
 NUM_UTT_FILE = join_path(DATA_DIR, 'num_utt')
 SPK_UTT_FILE = join_path(DATA_DIR, 'spk2utt')

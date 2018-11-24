@@ -19,14 +19,14 @@ TDNN_2_OUTPUT_SIZE = 512
 TDNN_3_OUTPUT_SIZE = 512
 TDNN_4_OUTPUT_SIZE = 512
 TDNN_5_OUTPUT_SIZE = 1500
-ATTENTION_SIZE = 512
+ATTENTION_SIZE = 256
 EMBEDDING_SIZE = 512
 DENSE_SIZE = 512
 
 MODEL_TAG = 'XVECTOR'
 
 logger = Logger()
-logger.set_config(filename='../logs/run-model.log', append=True)
+logger.set_config(filename='../logs/{}.log'.format(MODEL_TAG), append=True)
 
 
 class XVectorModel:
@@ -38,6 +38,7 @@ class XVectorModel:
         self.model_tag = model_tag
 
         input_ = tf.expand_dims(self.input_, axis=3)
+        input_ = tf.layers.batch_normalization(input_)
 
         tdnn_output = tdnn2d('tdnn1', input_, [-2, -1, 0, 1, 2], TDNN_1_OUTPUT_SIZE, activation=tf.nn.relu)
         tdnn_output = tf.layers.batch_normalization(tdnn_output)
@@ -72,7 +73,8 @@ class XVectorModel:
         self.logits = tf.layers.dense(dense_output, n_classes, activation=None)
 
         self.loss = tf.losses.sparse_softmax_cross_entropy(self.labels, self.logits)
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss)
+        self.global_step = tf.train.get_or_create_global_step()
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr).minimize(self.loss, global_step=self.global_step)
 
     def extract(self, save_loc, batch_loader, start=None, end=None):
         model_loc = join_path(join_path(save_loc, MODELS_DIR), self.model_tag)

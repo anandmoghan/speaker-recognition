@@ -20,6 +20,7 @@ def get_train_data(data_config):
     sre06 = make_old_sre_data(data_root, data_loc['SRE06'], 2006, speaker_key)
     sre08 = make_sre08_data(data_root, data_loc['SRE08_TRAIN'], data_loc['SRE08_TEST'])
     sre10 = make_sre10_data(data_root, data_loc['SRE10'])
+    sre16 = make_sre16_data(data_root, data_loc['SRE16_EVAL'])
     swbd_c1 = make_swbd_cellular(data_root, data_loc['SWBD_C1'], 1)
     swbd_c2 = make_swbd_cellular(data_root, data_loc['SWBD_C2'], 2)
     swbd_p1 = make_swbd_phase(data_root, data_loc['SWBD_P1'], 1)
@@ -27,7 +28,7 @@ def get_train_data(data_config):
     swbd_p3 = make_swbd_phase(data_root, data_loc['SWBD_P3'], 3)
     mx6_calls = make_mixer6_calls(data_root, data_loc['MX6'])
     mx6_mic = make_mixer6_mic(data_root, data_loc['MX6'])
-    train_data = np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, swbd_c1, swbd_c2, swbd_p1,
+    train_data = np.hstack([sre04, sre05_train, sre05_test, sre06, sre08, sre10, sre16, swbd_c1, swbd_c2, swbd_p1,
                             swbd_p2, swbd_p3, mx6_calls, mx6_mic]).T
     print('Removing Duplicates...')
     train_data, n_dup = remove_duplicates(train_data)
@@ -63,9 +64,10 @@ def make_old_sre_data(data_root, data_loc, sre_year, speaker_key):
             if sre_year == tokens[2]:
                 try:
                     file_loc = file_list[file_name]
-                    index_list.append('{}_{}_ch{}'.format(sre_year, file_name, channel))
+                    speaker_id = sre_year + '_' + speaker_id
+                    index_list.append('{}-{}_{}_ch{}'.format(speaker_id, sre_year, file_name, channel))
                     location_list.append(file_loc)
-                    speaker_list.append(sre_year + '_' + speaker_id)
+                    speaker_list.append(speaker_id)
                     channel_list.append(channel)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
                 except KeyError:
@@ -103,10 +105,11 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
             model_to_speaker[model_id] = speaker_id
             try:
                 file_loc = file_list[file_name]
-                index_list.append('sre2008_{}_ch{}'.format(file_name, channel))
+                speaker_id = 'sre2008_' + speaker_id
+                index_list.append('{}-sre2008_{}_ch{}'.format(speaker_id, file_name, channel))
                 location_list.append(file_loc)
                 channel_list.append(channel)
-                speaker_list.append('sre2008_' + speaker_id)
+                speaker_list.append(speaker_id)
                 read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
             except KeyError:
                 pass
@@ -120,12 +123,12 @@ def make_sre08_data(data_root, data_train_loc, data_test_loc):
             target_type = tokens[3]
             try:
                 file_loc = file_list[file_name]
-                speaker_id = model_to_speaker[model_id]
+                speaker_id = 'sre2008_' + model_to_speaker[model_id]
                 if target_type == 'target':
-                    index_list.append('sre2008_{}_ch{}'.format(file_name, channel))
+                    index_list.append('{}-sre2008_{}_ch{}'.format(speaker_id, file_name, channel))
                     location_list.append(file_loc)
                     channel_list.append(channel)
-                    speaker_list.append('sre2008_' + speaker_id)
+                    speaker_list.append(speaker_id)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
                     del file_list[file_name]
             except KeyError:
@@ -167,10 +170,10 @@ def make_sre10_data(data_root, data_loc):
             channel = 1 if tokens[3] == 'A' else 2
             try:
                 file_loc = file_list[file_name]
-                speaker_id = model_to_speaker[model_id]
-                index_list.append('sre2010_{}_ch{}'.format(file_name, channel))
+                speaker_id = 'sre2010_' + model_to_speaker[model_id]
+                index_list.append('{}-sre2010_{}_ch{}'.format(speaker_id, file_name, channel))
                 location_list.append(file_loc)
-                speaker_list.append('sre2010_' + speaker_id)
+                speaker_list.append(speaker_id)
                 channel_list.append(channel)
                 read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
             except KeyError:
@@ -184,12 +187,12 @@ def make_sre10_data(data_root, data_loc):
             channel = 1 if tokens[2] == 'A' else 2
             target_type = tokens[3]
             try:
-                speaker_id = model_to_speaker[model_id]
+                speaker_id = 'sre2010_' + model_to_speaker[model_id]
                 file_loc = file_list[file_name]
                 if target_type == 'target':
-                    index_list.append('sre2010_{}_ch{}'.format(file_name, channel))
+                    index_list.append('{}-sre2010_{}_ch{}'.format(speaker_id, file_name, channel))
                     location_list.append(file_loc)
-                    speaker_list.append('sre2010_' + speaker_id)
+                    speaker_list.append(speaker_id)
                     channel_list.append(channel)
                     read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
                     del file_list[file_name]
@@ -198,6 +201,86 @@ def make_sre10_data(data_root, data_loc):
 
     print('Made {:d} files from sre2010.'.format(len(index_list)))
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
+
+
+def make_sre16_data(data_root, data_loc):
+    print('Making sre2016 lists...')
+    sre_loc = join_path(data_root, data_loc)
+    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'))
+    meta_key = join_path(sre_loc, 'docs/sre16_eval_enrollment.tsv')
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    with open(meta_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            speaker_id = 'sre16_eval_enroll_' + tokens[0]
+            file_name = tokens[1]
+            try:
+                file_loc = file_list[file_name]
+                index_list.append('{}-sre16_eval_enroll_{}'.format(speaker_id, file_name))
+                location_list.append(file_loc)
+                speaker_list.append(speaker_id)
+                channel_list.append(1)
+                read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                del file_list[file_name]
+            except KeyError:
+                pass
+
+    print('Made {:d} enrollment files.'.format(len(index_list)))
+    enrollment_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
+
+    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'))
+
+    segment_key = join_path(sre_loc, 'docs/sre16_eval_segment_key.tsv')
+    language_key = join_path(sre_loc, 'metadata/calls.tsv')
+    trial_key = join_path(sre_loc, 'docs/sre16_eval_trial_key.tsv')
+
+    utt_to_call = dict()
+    with open(segment_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            utt_to_call[tokens[0]] = tokens[1]
+
+    call_to_language = dict()
+    with open(language_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            call_to_language[tokens[0]] = tokens[1]
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    language_list = []
+    target_list = []
+    with open(trial_key, 'r') as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            speaker_id = 'sre16_eval_enroll_' + tokens[0]
+            file_name = tokens[1]
+            target_type = tokens[3]
+            call_id = utt_to_call[file_name]
+            try:
+                file_loc = file_list[file_name]
+                index_list.append('{}-sre16_eval_test_{}'.format(speaker_id, file_name))
+                location_list.append(file_loc)
+                speaker_list.append(speaker_id)
+                channel_list.append(1)
+                read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                language_list.append(call_to_language[call_id])
+                target_list.append(target_type)
+                del file_list[file_name]
+            except KeyError:
+                pass
+
+    print('Made {:d} test files.'.format(len(index_list)))
+    test_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
+    return np.hstack([enrollment_data, test_data])
 
 
 def make_swbd_cellular(data_root, data_loc, cellular=1):
@@ -225,19 +308,19 @@ def make_swbd_cellular(data_root, data_loc, cellular=1):
         for line in f.readlines():
             tokens = re.split('[,]+', line.strip())
             file_name = tokens[0]
-            speaker_id1 = tokens[1]
-            speaker_id2 = tokens[2]
+            speaker_id1 = 'sw_' + tokens[1]
+            speaker_id2 = 'sw_' + tokens[2]
             try:
                 file_loc = file_list['sw_' + str(file_name)]
-                index_list.append(swbd_type + file_name + '_ch1')
+                index_list.append(speaker_id1 + '-' + swbd_type + file_name + '_ch1')
                 location_list.append(file_loc)
                 channel_list.append(1)
-                speaker_list.append('sw_' + speaker_id1)
+                speaker_list.append(speaker_id1)
                 read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                index_list.append(swbd_type + file_name + '_ch2')
+                index_list.append(speaker_id2 + '-' + swbd_type + file_name + '_ch2')
                 location_list.append(file_loc)
                 channel_list.append(2)
-                speaker_list.append('sw_' + speaker_id2)
+                speaker_list.append(speaker_id2)
                 read_list.append('sph2pipe -f wav -p -c 2 {}'.format(file_loc))
                 del file_list['sw_' + str(file_name)]
             except KeyError:
@@ -273,14 +356,14 @@ def make_swbd_phase(data_root, data_loc, phase=1):
         for line in f.readlines():
             tokens = re.split('[,]+', line.strip())
             file_name = ('sw_' + tokens[0]) if phase == 3 else ('' + tokens[0].split('.')[0])
-            speaker_id = str(tokens[2])
+            speaker_id = 'sw_' + str(tokens[2])
             channel = 1 if tokens[3] == 'A' else 2
             try:
                 file_loc = file_list[file_name]
-                index_list.append(swbd_type + file_name + '_ch{:d}'.format(channel))
+                index_list.append(speaker_id + '-' + swbd_type + file_name + '_ch{:d}'.format(channel))
                 location_list.append(file_loc)
                 channel_list.append(channel)
-                speaker_list.append('sw_' + speaker_id)
+                speaker_list.append(speaker_id)
                 read_list.append('sph2pipe -f wav -p -c {} {}'.format(channel, file_loc))
             except KeyError:
                 pass
@@ -311,20 +394,20 @@ def make_mixer6_calls(data_root, data_loc):
         for line in f.readlines()[1:]:
             tokens = re.split('[,]+', line.strip())
             call_id = tokens[0]
-            speaker_id1 = tokens[4]
-            speaker_id2 = tokens[12]
+            speaker_id1 = 'MX6_' + tokens[4]
+            speaker_id2 = 'MX6_' + tokens[12]
             try:
                 file_name = call_to_file[call_id]
                 file_loc = file_list[file_name]
-                index_list.append('MX6_CALLS_{}_ch1'.format(file_name))
+                index_list.append('{}-MX6_CALLS_{}_ch1'.format(speaker_id1, file_name))
                 location_list.append(file_loc)
                 channel_list.append(1)
-                speaker_list.append('MX6_{}'.format(speaker_id1))
+                speaker_list.append(speaker_id1)
                 read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                index_list.append('MX6_CALLS_{}_ch2'.format(file_name))
+                index_list.append('{}-MX6_CALLS_{}_ch2'.format(speaker_id2, file_name))
                 location_list.append(file_loc)
                 channel_list.append(2)
-                speaker_list.append('MX6_{}'.format(speaker_id2))
+                speaker_list.append(speaker_id2)
                 read_list.append('sph2pipe -f wav -p -c 2 {}'.format(file_loc))
             except KeyError:
                 pass
@@ -356,7 +439,7 @@ def make_mixer6_mic(data_root, data_loc):
         for line in f.readlines()[1:]:
             tokens = re.split('[,]+', line.strip())
             session_id = tokens[0]
-            speaker_id = re.split('[_]+', session_id)[3]
+            speaker_id = 'MX6_' + re.split('[_]+', session_id)[3]
             start_time = tokens[7]
             end_time = tokens[8]
             if session_id not in bad_audio:
@@ -364,10 +447,10 @@ def make_mixer6_mic(data_root, data_loc):
                     file_name = '{}_CH{}'.format(session_id, idx)
                     try:
                         file_loc = file_list[file_name]
-                        index_list.append('MX6_MIC_{}'.format(file_name))
+                        index_list.append('{}-MX6_MIC_{}'.format(speaker_id, file_name))
                         location_list.append(file_loc)
                         channel_list.append(1)
-                        speaker_list.append('MX6_{}'.format(speaker_id))
+                        speaker_list.append(speaker_id)
                         read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
                                          .format(file_loc, start_time, float(end_time) - float(start_time)))
                     except KeyError:
@@ -377,103 +460,15 @@ def make_mixer6_mic(data_root, data_loc):
     return np.vstack([index_list, location_list, channel_list, speaker_list, read_list])
 
 
-def make_sre16_eval_data(sre_config):
-    print('Making sre2016 eval lists...')
+def make_sre18_dev_data(sre_config):
+    print('Making sre2018 dev lists...')
     with open(sre_config, 'r') as f:
         sre_data = load_json(f.read())
     data_root = sre_data['ROOT']
-    data_loc = sre_data['LOCATION']['SRE16_EVAL']
+    data_loc = sre_data['LOCATION']['SRE18_DEV']
     sre_loc = join_path(data_root, data_loc)
 
-    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'))
-
-    meta_key = join_path(sre_loc, 'docs/sre16_eval_enrollment.tsv')
-
-    index_list = []
-    location_list = []
-    speaker_list = []
-    channel_list = []
-    read_list = []
-    with open(meta_key, 'r') as f:
-        for line in f.readlines()[1:]:
-            tokens = re.split('[\s]+', line.strip())
-            speaker_id = tokens[0]
-            file_name = tokens[1]
-            try:
-                file_loc = file_list[file_name]
-                index_list.append('sre16_eval_enroll_' + file_name)
-                location_list.append(file_loc)
-                speaker_list.append('sre16_eval_enroll_' + speaker_id)
-                channel_list.append(1)
-                read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                del file_list[file_name]
-            except KeyError:
-                pass
-
-    print('Made {:d} enrollment files.'.format(len(index_list)))
-    enrollment_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
-
-    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'))
-
-    segment_key = join_path(sre_loc, 'docs/sre16_eval_segment_key.tsv')
-    language_key = join_path(sre_loc, 'metadata/calls.tsv')
-    trial_key = join_path(sre_loc, 'docs/sre16_eval_trial_key.tsv')
-
-    utt_to_call = dict()
-    with open(segment_key, 'r') as f:
-        for line in f.readlines()[1:]:
-            tokens = re.split('[\s]+', line.strip())
-            utt_to_call[tokens[0]] = tokens[1]
-
-    call_to_language = dict()
-    with open(language_key, 'r') as f:
-        for line in f.readlines()[1:]:
-            tokens = re.split('[\s]+', line.strip())
-            call_to_language[tokens[0]] = tokens[1]
-
-    index_list = []
-    location_list = []
-    speaker_list = []
-    channel_list = []
-    read_list = []
-    language_list = []
-    target_list = []
-    with open(trial_key, 'r') as f:
-        for line in f.readlines()[1:]:
-            tokens = re.split('[\s]+', line.strip())
-            speaker_id = tokens[0]
-            file_name = tokens[1]
-            target_type = tokens[3]
-            call_id = utt_to_call[file_name]
-            try:
-                file_loc = file_list[file_name]
-                index_list.append('sre16_eval_test_' + file_name)
-                location_list.append(file_loc)
-                speaker_list.append('sre16_eval_enroll_' + speaker_id)
-                channel_list.append(1)
-                read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                language_list.append(call_to_language[call_id])
-                target_list.append(target_type)
-                del file_list[file_name]
-            except KeyError:
-                pass
-
-    print('Made {:d} test files.'.format(len(index_list)))
-    test_data = np.vstack([index_list, location_list, channel_list, speaker_list, read_list, target_list,
-                           language_list]).T
-
-    return enrollment_data, test_data
-
-
-def make_sre16_unlabelled_data(sre_config):
-    print('Making sre2016 unlabelled lists...')
-    with open(sre_config, 'r') as f:
-        sre_data = load_json(f.read())
-    data_root = sre_data['ROOT']
-    data_loc = sre_data['LOCATION']['SRE16_UNLABELED']
-    sre_loc = join_path(data_root, data_loc)
-
-    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/unlabeled/major'))
+    file_list = get_file_list_as_dict(join_path(sre_loc, 'data/unlabeled'))
 
     index_list = []
     location_list = []
@@ -481,13 +476,166 @@ def make_sre16_unlabelled_data(sre_config):
     channel_list = []
     read_list = []
     for key in file_list.keys():
-        index_list.append(key)
+        index_list.append('sre18_unlabelled_{}'.format(key))
         location_list.append(file_list[key])
-        speaker_list.append('sre16_unlabelled_{}'.format(key))
+        speaker_list.append('sre18_unlabelled_{}'.format(key))
         channel_list.append(1)
         read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_list[key]))
 
-    return np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+    sre_unlabeled = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+
+    sph_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'), pattern='*.sph', ext=True)
+    flac_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'), pattern='*.flac', ext=True)
+    diarization_file = join_path(sre_loc, 'docs/sre18_dev_enrollment_diarization.tsv')
+    key_file = join_path(sre_loc, 'docs/sre18_dev_enrollment.tsv')
+
+    diarization_dict = dict()
+    with open(diarization_file) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            diarization_dict[tokens[0]] = (float(tokens[2]), float(tokens[3]))
+
+    utt_to_spk = dict()
+    with open(key_file) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            utt_to_spk[tokens[1]] = tokens[0]
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    for key in sph_file_list.keys():
+        file_loc = sph_file_list[key]
+        index_list.append('sre18_dev_enroll_{}'.format(key))
+        location_list.append(file_loc)
+        speaker_list.append('sre18_dev_enroll_{}'.format(utt_to_spk[key]))
+        channel_list.append(1)
+        read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+
+    for key in flac_file_list.keys():
+        file_loc = flac_file_list[key]
+        index_list.append('sre18_dev_enroll_{}'.format(key))
+        location_list.append(file_loc)
+        speaker_list.append('sre18_dev_enroll_{}'.format(utt_to_spk[key]))
+        channel_list.append(1)
+        try:
+            start_time, end_time = diarization_dict[key]
+            read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
+                             .format(file_loc, start_time, float(end_time) - float(start_time)))
+        except KeyError:
+            read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_list[key]))
+
+    sre_dev_enroll = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+
+    sph_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'), pattern='*.sph', ext=True)
+    flac_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'), pattern='*.flac', ext=True)
+    file_list = {**sph_file_list, **flac_file_list}
+    trials_key = join_path(sre_loc, 'docs/sre18_dev_trial_key.tsv')
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    with open(trials_key) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            file_loc = file_list[tokens[1]]
+            if tokens[3] == 'target':
+                index_list.append('sre18_dev_test_{}'.format(tokens[1]))
+                location_list.append(file_loc)
+                speaker_list.append('sre18_dev_test_{}'.format(tokens[0]))
+                channel_list.append(1)
+                if tokens[1][-3:] == 'sph':
+                    read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                else:
+                    read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+
+    sre_dev_test = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+    return sre_dev_enroll, sre_dev_test, sre_unlabeled
+
+
+def make_sre18_eval_data(sre_config):
+    print('Making sre2018 eval lists...')
+    with open(sre_config, 'r') as f:
+        sre_data = load_json(f.read())
+    data_root = sre_data['ROOT']
+    data_loc = sre_data['LOCATION']['SRE18_EVAL']
+    sre_loc = join_path(data_root, data_loc)
+
+    sph_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'), pattern='*.sph', ext=True)
+    flac_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/enrollment'), pattern='*.flac', ext=True)
+    diarization_file = join_path(sre_loc, 'docs/sre18_eval_enrollment_diarization.tsv')
+    key_file = join_path(sre_loc, 'docs/sre18_eval_enrollment.tsv')
+
+    diarization_dict = dict()
+    with open(diarization_file) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            diarization_dict[tokens[0]] = (float(tokens[2]), float(tokens[3]))
+
+    utt_to_spk = dict()
+    with open(key_file) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            utt_to_spk[tokens[1]] = tokens[0]
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    for key in sph_file_list.keys():
+        file_loc = sph_file_list[key]
+        index_list.append('sre18_eval_enroll_{}'.format(key))
+        location_list.append(file_loc)
+        speaker_list.append('sre18_eval_enroll_{}'.format(utt_to_spk[key]))
+        channel_list.append(1)
+        read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+
+    for key in flac_file_list.keys():
+        file_loc = flac_file_list[key]
+        index_list.append('sre18_eval_enroll_{}'.format(key))
+        location_list.append(file_loc)
+        speaker_list.append('sre18_eval_enroll_{}'.format(utt_to_spk[key]))
+        channel_list.append(1)
+        try:
+            start_time, end_time = diarization_dict[key]
+            read_list.append('sox -t flac {} -r 8k -t wav -V0 - trim {} {}'
+                             .format(file_loc, start_time, float(end_time) - float(start_time)))
+        except KeyError:
+            read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+
+    sre_eval_enroll = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+
+    sph_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'), pattern='*.sph', ext=True)
+    flac_file_list = get_file_list_as_dict(join_path(sre_loc, 'data/test'), pattern='*.flac', ext=True)
+    file_list = {**sph_file_list, **flac_file_list}
+    trials_key = join_path(sre_loc, 'docs/sre18_eval_trial_key.tsv')
+
+    index_list = []
+    location_list = []
+    speaker_list = []
+    channel_list = []
+    read_list = []
+    with open(trials_key) as f:
+        for line in f.readlines()[1:]:
+            tokens = re.split('[\s]+', line.strip())
+            file_loc = file_list[tokens[1]]
+            if tokens[3] == 'target':
+                index_list.append('sre18_eval_test_{}'.format(tokens[1]))
+                location_list.append(file_loc)
+                speaker_list.append('sre18_eval_test_{}'.format(tokens[0]))
+                channel_list.append(1)
+                if tokens[1][-3:] == 'sph':
+                    read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                else:
+                    read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+
+    sre_eval_test = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
+    return sre_eval_enroll, sre_eval_test
 
 
 def make_sre16_trials_file(sre_config, trials_file):

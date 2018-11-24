@@ -3,4 +3,5 @@
 source /state/partition1/softwares/Miniconda3/etc/profile.d/conda.sh
 conda activate tensorflow
 
-python -u run-e2e.py --stage 3 -sc --model-tag ATTN_3 --gpu 0
+python -u run-e2e.py --stage 4 -sc --model-tag ATTN_3 --gpu 0
+#python -u run-model.py --stage 3 -sc --model-tag HGRU_3 --gpu 1
