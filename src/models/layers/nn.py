@@ -12,7 +12,7 @@ def get_gather_idx(context, batch_size, n_frames):
     return np.array(gather_idx)
 
 
-def tdnn2d(name, input_, context, out_channels, activation=None):
+def tdnn(name, input_, context, out_channels, activation=None):
     context = np.array(context)
     context = context if min(context) >= 0 else context - np.array([min(context)] * len(context))
     kernel_height = input_.shape[1]
@@ -22,10 +22,10 @@ def tdnn2d(name, input_, context, out_channels, activation=None):
 
     with tf.variable_scope(name) as scope:
         kernel = tf.get_variable('{}_weights'.format(name),
-                                 shape=[kernel_height, out_channels, in_channels, kernel_width],
-                                 dtype=tf.float32, initializer=tf.initializers.random_normal())
+                                 shape=[kernel_height, out_channels, in_channels, kernel_width], dtype=tf.float32,
+                                 initializer=tf.initializers.random_normal(0, 0.01), trainable=True)
         bias = tf.get_variable('{}_bias'.format(name), shape=[out_channels], dtype=tf.float32,
-                               initializer=tf.initializers.random_normal())
+                               initializer=tf.zeros_initializer(), trainable=True)
         kernel = tf.multiply(kernel, tf.cast(tf.constant(mask), dtype=kernel.dtype))
         kernel = tf.transpose(kernel, [0, 3, 2, 1])
         output_ = tf.nn.convolution(input_, kernel, strides=[1, 1], padding="VALID", name=scope.name) + bias

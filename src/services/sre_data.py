@@ -510,7 +510,7 @@ def make_sre18_dev_data(sre_config):
         file_loc = sph_file_list[key]
         index_list.append('sre18_dev_enroll_{}'.format(key))
         location_list.append(file_loc)
-        speaker_list.append('sre18_dev_enroll_{}'.format(utt_to_spk[key]))
+        speaker_list.append(utt_to_spk[key])
         channel_list.append(1)
         read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
 
@@ -518,7 +518,7 @@ def make_sre18_dev_data(sre_config):
         file_loc = flac_file_list[key]
         index_list.append('sre18_dev_enroll_{}'.format(key))
         location_list.append(file_loc)
-        speaker_list.append('sre18_dev_enroll_{}'.format(utt_to_spk[key]))
+        speaker_list.append(utt_to_spk[key])
         channel_list.append(1)
         try:
             start_time, end_time = diarization_dict[key]
@@ -542,16 +542,20 @@ def make_sre18_dev_data(sre_config):
     with open(trials_key) as f:
         for line in f.readlines()[1:]:
             tokens = re.split('[\s]+', line.strip())
-            file_loc = file_list[tokens[1]]
-            if tokens[3] == 'target':
-                index_list.append('sre18_dev_test_{}'.format(tokens[1]))
-                location_list.append(file_loc)
-                speaker_list.append('sre18_dev_test_{}'.format(tokens[0]))
-                channel_list.append(1)
-                if tokens[1][-3:] == 'sph':
-                    read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                else:
-                    read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+            try:
+                file_loc = file_list[tokens[1]]
+                if tokens[3] == 'target':
+                    index_list.append(tokens[1])
+                    location_list.append(file_loc)
+                    speaker_list.append(tokens[1])
+                    channel_list.append(1)
+                    if tokens[1][-3:] == 'sph':
+                        read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                    else:
+                        read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+                    del file_list[tokens[1]]
+            except KeyError:
+                pass
 
     sre_dev_test = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
     return sre_dev_enroll, sre_dev_test, sre_unlabeled
@@ -591,7 +595,7 @@ def make_sre18_eval_data(sre_config):
         file_loc = sph_file_list[key]
         index_list.append('sre18_eval_enroll_{}'.format(key))
         location_list.append(file_loc)
-        speaker_list.append('sre18_eval_enroll_{}'.format(utt_to_spk[key]))
+        speaker_list.append(utt_to_spk[key])
         channel_list.append(1)
         read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
 
@@ -599,7 +603,7 @@ def make_sre18_eval_data(sre_config):
         file_loc = flac_file_list[key]
         index_list.append('sre18_eval_enroll_{}'.format(key))
         location_list.append(file_loc)
-        speaker_list.append('sre18_eval_enroll_{}'.format(utt_to_spk[key]))
+        speaker_list.append(utt_to_spk[key])
         channel_list.append(1)
         try:
             start_time, end_time = diarization_dict[key]
@@ -623,16 +627,20 @@ def make_sre18_eval_data(sre_config):
     with open(trials_key) as f:
         for line in f.readlines()[1:]:
             tokens = re.split('[\s]+', line.strip())
-            file_loc = file_list[tokens[1]]
-            if tokens[3] == 'target':
-                index_list.append('sre18_eval_test_{}'.format(tokens[1]))
-                location_list.append(file_loc)
-                speaker_list.append('sre18_eval_test_{}'.format(tokens[0]))
-                channel_list.append(1)
-                if tokens[1][-3:] == 'sph':
-                    read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
-                else:
-                    read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+            try:
+                file_loc = file_list[tokens[1]]
+                if tokens[3] == 'target':
+                    index_list.append(tokens[1])
+                    location_list.append(file_loc)
+                    speaker_list.append(tokens[1])
+                    channel_list.append(1)
+                    if tokens[1][-3:] == 'sph':
+                        read_list.append('sph2pipe -f wav -p -c 1 {}'.format(file_loc))
+                    else:
+                        read_list.append('sox -t flac {} -r 8k -t wav -V0 -'.format(file_loc))
+                    del file_list[tokens[1]]
+            except KeyError:
+                pass
 
     sre_eval_test = np.vstack([index_list, location_list, channel_list, speaker_list, read_list]).T
     return sre_eval_enroll, sre_eval_test

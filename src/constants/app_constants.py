@@ -3,6 +3,13 @@ from os.path import join as join_path
 KALDI_PATH_FILE = './kaldi/path.sh'
 KALDI_QUEUE_FILE = './kaldi/queue.pl'
 
+QUEUE_DELETE_CMD = 'qdel {}'
+QUEUE_GPU_USAGE_CMD = "qstat -q gpu.q -u \* | tail -n +3 | awk -F '[ ,@]+' '{print $10}'"
+QUEUE_JOB_STATUS_CMD = 'qstat -j {}'
+QUEUE_SUBMIT_CMD = 'qsub -V -cwd -b y -l hostname={hostname} -N {name} -q gpu.q -o {log_file} -e {log_file} {cmd}'
+
+SAVE_LOC = '/home/anandm/workspace/speaker-recognition/save'
+
 DATA_DIR = 'data'
 EMB_DIR = 'embeddings'
 EGS_DIR = 'egs'
@@ -12,6 +19,11 @@ MODELS_DIR = 'models'
 PLDA_DIR = 'plda'
 VAD_DIR = 'vad'
 TMP_DIR = 'tmp'
+
+NUM_CLASSES = 7560
+NUM_EGS = 134
+NUM_FEATURES = 23
+NUM_CPU_WORKERS = 10
 
 TRAIN_SPLIT = 'train'
 DEV_SPLIT = 'dev'

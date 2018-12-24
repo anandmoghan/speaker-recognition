@@ -1,6 +1,13 @@
 import tensorflow as tf
 
 
+def multi_head_attention(input_, sizes):
+    output_ = []
+    for size in sizes:
+        output_.append(variable_attention(input_, size))
+    return tf.concat(output_, axis=1)
+
+
 def supervised_attention(input_, context_vector, size):
     hidden_units = input_.shape[2]
     transformed_input = tf.layers.dense(input_, size, activation=tf.nn.tanh)

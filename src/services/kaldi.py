@@ -1,4 +1,5 @@
 from collections import Counter
+from random import shuffle
 from subprocess import Popen, PIPE
 from os.path import abspath, join as join_path
 
@@ -75,7 +76,7 @@ class PLDA:
         num_utterances_file = join_path(self.save_loc, '{}_{}'.format(NUM_UTT_FILE, enroll_split))
         enroll_spk_utt_file = join_path(self.save_loc, '{}_{}'.format(SPK_UTT_FILE, enroll_split))
         enroll_utt_spk_file = join_path(self.save_loc, '{}_{}'.format(UTT_SPK_FILE, enroll_split))
-        make_num_utterance(enroll_speaker_list, num_utterances_file)
+        write_num_utterance(enroll_speaker_list, num_utterances_file)
         make_spk_to_utt(enroll_index_list, enroll_speaker_list, enroll_spk_utt_file)
         make_utt_to_spk(enroll_index_list, enroll_speaker_list, enroll_utt_spk_file)
 
@@ -200,13 +201,6 @@ def make_labels_to_index_dict(index_list, label_list):
     return label_to_index_dict
 
 
-def make_num_utterance(speaker_list, num_utt_file):
-    speaker_counter = Counter(speaker_list)
-    with open(num_utt_file, 'w') as f:
-        for speaker in speaker_counter.keys():
-            f.write('{} {}\n'.format(speaker, speaker_counter[speaker]))
-
-
 def make_spk_to_utt(index_list, speaker_list, spk_utt_file):
     idx = np.argsort(speaker_list)
     index_list = index_list[idx]
@@ -240,16 +234,15 @@ def make_wav_scp(index_list, read_list, wav_scp):
             f.write('{} {} |\n'.format(i, r))
 
 
-def parse_egs_scp(egs_id, save_loc='../save'):
-    egs_loc = join_path(save_loc, EGS_DIR)
-    egs_file = join_path(egs_loc, 'egs.{}.scp'.format(egs_id))
-
+def parse_egs_scp(egs_file, shuffle_egs=False):
     data = []
     with open(egs_file) as f:
         for line in f.readlines():
             tokens = re.split('[\s]+', line.strip())
             label = tokens[0].split('-')[-1]
             data.append((tokens[0], tokens[1], label))
+    if shuffle_egs:
+        shuffle(data)
     return data
 
 
@@ -258,14 +251,42 @@ def read_egs(scp_file, n_features, print_error=False):
     features = re.split('\]', output)[:-1]
     feature_list = []
     for i in range(0, len(features), 2):
-        feature = re.split('\[', features[i])[1]
-        feature = np.fromstring(feature, dtype=float, sep=' \n').reshape([-1, n_features]).T
+        split = re.split('\[', features[i])
+        feature = np.fromstring(split[1], dtype=float, sep=' \n').reshape([-1, n_features]).T
         feature_list.append(feature)
-    return np.array(feature_list)
+    return feature_list
 
 
-def read_feat(scp_file, n_features):
-    output = Kaldi().run_command('copy-feats scp:{} ark,t:'.format(scp_file))
+def read_egs_as_dict(scp_file, n_features, print_error=False):
+    output = Kaldi().run_command('nnet3-copy-egs scp:{} ark,t:'.format(scp_file), print_error=print_error)
+    features = re.split('\]', output)[:-1]
+    utt_list = []
+    feature_list = []
+    for i in range(0, len(features), 2):
+        split = re.split('\[', features[i])
+        utt_id = re.split('[\s]+', split[0])[3]
+        feature = np.fromstring(split[1], dtype=float, sep=' \n').reshape([-1, n_features]).T
+        utt_list.append(utt_id)
+        feature_list.append(feature)
+    return dict(zip(utt_list, feature_list))
+
+
+def read_egs_with_ark(ark, n_features, print_error=False):
+    output = Kaldi().run_command('nnet3-copy-egs ark:{} ark,t:'.format(ark), print_error=print_error)
+    feature = re.split('\]', output)[0]
+    print(feature[:10], feature[-10:])
+    feature = re.split('\[', feature)[1]
+    return np.fromstring(feature, dtype=float, sep=' \n').reshape([-1, n_features]).T
+
+
+def read_feat(scp_file, n_features, print_error=False):
+    output = Kaldi().run_command('copy-feats scp:{} ark,t:'.format(scp_file), print_error=print_error)
+    output = re.split('\[', output)[1][1:-2]
+    return np.fromstring(output, dtype=float, sep=' \n').reshape([-1, n_features]).T
+
+
+def read_feat_with_ark(ark, n_features, print_error=False):
+    output = Kaldi().run_command('copy-feats ark:{} ark,t:'.format(ark), print_error=print_error)
     output = re.split('\[', output)[1][1:-2]
     return np.fromstring(output, dtype=float, sep=' \n').reshape([-1, n_features]).T
 
@@ -315,10 +336,17 @@ def spaced_file_to_dict(scp_file):
     return file_dict
 
 
-def write_vector(arr, utt_id, ark_file):
+def write_num_utterance(speaker_list, num_utt_file):
+    speaker_counter = Counter(speaker_list)
+    with open(num_utt_file, 'w') as f:
+        for speaker in speaker_counter.keys():
+            f.write('{} {}\n'.format(speaker, speaker_counter[speaker]))
+
+
+def write_vector(arr, utt_id, ark_file, print_error=False):
     arr = np.array(arr)
     np.set_printoptions(threshold=np.nan, linewidth=np.nan)
-    output = Kaldi().run_command('echo [ {} ] | copy-vector - -'.format(np.array_str(arr)[1:-1]), decode=False)
+    output = Kaldi().run_command('echo [ {} ] | copy-vector - -'.format(np.array_str(arr)[2:-1]), decode=False, print_error=print_error)
     with open(ark_file, 'wb') as f:
         f.write(output)
     return '{} {}:{}\n'.format(utt_id, abspath(ark_file), 0)

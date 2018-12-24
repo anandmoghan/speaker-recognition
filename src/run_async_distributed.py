@@ -7,10 +7,10 @@ from services.distributed import append_ps_and_workers, assign_nodes, make_param
 import argparse as ap
 
 parser = ap.ArgumentParser()
-parser.add_argument('--cmd', default='python -u distributed_train.py', help='Python script command. Eg: python -u train.py --epochs 10')
-parser.add_argument('--model-tag', default='XVECTOR', help='Model Tag')
+parser.add_argument('--cmd', default='python -u async_train.py', help='Python script command. Eg: python -u train.py --epochs 10')
+parser.add_argument('--model-tag', default='HGRU', help='Model Tag')
 parser.add_argument('--num-ps', type=int, default=1, help='Number of Parameter Servers')
-parser.add_argument('--num-workers', type=int, default=4, help='Number of Workers')
+parser.add_argument('--num-workers', type=int, default=3, help='Number of Workers')
 parser.add_argument('--save', default='../save', help='Save Location')
 parser.add_argument('--start-port', type=int, default=7770, help='Starting port value')
 

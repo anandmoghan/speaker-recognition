@@ -28,9 +28,6 @@ def make_sre_data(data_config, save_loc):
     save_object(join_path(data_loc, 'sre_dev.pkl'), (sre_dev_enroll, sre_dev_test))
     save_object(join_path(data_loc, 'sre_eval.pkl'), (sre_eval_enroll, sre_eval_test))
     print('Data lists saved at: {}'.format(data_loc))
-    # print('Stage 0: Making trials file..')
-    # trials_file = join_path(args.save, TRIALS_FILE)
-    # make_sre16_trials_file(DATA_CONFIG, trials_file)
     return train_data, sre_unlabelled, sre_dev_enroll, sre_dev_test, sre_eval_enroll, sre_eval_test
 
 

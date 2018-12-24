@@ -1,17 +1,32 @@
-from fnmatch import fnmatch
-from subprocess import Popen, PIPE
-
-from tqdm import tqdm
 from os.path import join as join_path
-
+from subprocess import Popen, PIPE
+from fnmatch import fnmatch
+from tqdm import tqdm
 
 import multiprocessing as mp
 import numpy as np
-import os
 import pickle
 import time
+import os
 
 from constants.app_constants import DATA_DIR, EMB_DIR, LOGS_DIR, MFCC_DIR, MODELS_DIR, PLDA_DIR, VAD_DIR, TMP_DIR
+
+
+def append_cwd_to_python_path(cmd):
+    return 'export PYTHONPATH=$PYTHONPATH:$CWD && {}'.format(cmd)
+
+
+def arrange_data(data, window, hop):
+    n_frames = data.shape[2]
+    start_frame = 0
+    end_frame = start_frame + window
+    new_data = []
+    while end_frame <= n_frames:
+        new_data.append(data[:, :, start_frame:end_frame])
+        start_frame += hop
+        end_frame = start_frame + window
+
+    return np.concatenate(new_data, axis=2)
 
 
 def create_directories(save_loc):
@@ -47,6 +62,19 @@ def create_wav(save_loc, args):
     return args
 
 
+def delete_directory(path):
+    try:
+        for item in os.listdir(path):
+            item = join_path(path, item)
+            if os.path.isdir(item):
+                delete_directory(item)
+            else:
+                os.remove(item)
+        os.removedirs(path)
+    except FileNotFoundError:
+        pass
+
+
 def get_file_list(location, pattern='*.sph'):
     file_list = []
     for path, _, files in os.walk(location):
@@ -72,11 +100,42 @@ def get_file_list_as_dict(location, pattern='*.sph', ext=False):
     return file_list
 
 
+def get_free_gpu():
+    output, _ = run_command('nvidia-smi')
+    output = output.split('\n')
+    start_idx = 7
+    n_gpu = 0
+    all_gpu_break = 0
+    for i, line in enumerate(output[start_idx:]):
+        line = line.strip()
+        if line == '':
+            all_gpu_break = start_idx + i
+            break
+        elif line[0] == '+':
+            n_gpu += 1
+
+    start_idx = all_gpu_break + 5
+    all_gpu_dict = dict(zip(range(n_gpu), [True] * n_gpu))
+    for line in output[start_idx:-2]:
+        try:
+            gpu = int(line.split()[1])
+            del all_gpu_dict[gpu]
+        except ValueError:
+            break
+        except KeyError:
+            pass
+    return list(all_gpu_dict.keys())
+
+
 def get_index_array(max_len, shuffle=False):
     if shuffle:
         return np.random.permutation(max_len)
     else:
         return np.linspace(0, max_len - 1, max_len, dtype=int)
+
+
+def get_time_stamp():
+    return time.strftime('%b %d, %Y %l:%M:%S%p')
 
 
 def load_array(file_name):
@@ -90,11 +149,20 @@ def load_object(file_name):
 
 def make_directory(path):
     if not os.path.exists(path):
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
 
 def make_dict(key_list, value_list):
     return dict([(key, value) for key, value in zip(key_list, value_list)])
+
+
+def print_script_args(args):
+    print(' '.join(args))
+    print()
+
+
+def print_time_stamp():
+    print(time.strftime(' %b %d, %Y %l:%M:%S%p'))
 
 
 def put_time_stamp(text):
@@ -122,6 +190,7 @@ def run_parallel(func, args_list, n_workers=10, p_bar=True):
     else:
         out = pool.map(func, args_list)
     pool.close()
+    # pool.join()
     if out is not None:
         return list(out)
 
@@ -166,4 +235,10 @@ def tensorflow_debug(debug=False):
 
 
 def use_gpu(gpu_id):
+    if gpu_id < 0:
+        available = get_free_gpu()
+        if len(available) == 0:
+            raise Exception('No free gpu devices available.')
+        else:
+            gpu_id = available[0]
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
